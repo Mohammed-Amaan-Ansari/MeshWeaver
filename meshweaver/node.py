@@ -13,9 +13,5 @@ class MeshNode:
     async def start(self):
         print(f" Node started: {self.node_id[:8]} @ {self.host}:{self.port}")
 
-        while True:
-            await asyncio.sleep(5)
-
-            print(
-                f" [{self.node_id[:8]}] alive | peers={len(self.peers)}"
-            )
+        # Keep the node alive forever
+        await asyncio.Event().wait()
