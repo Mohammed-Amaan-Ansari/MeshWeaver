@@ -5,6 +5,7 @@ import json
 
 from meshweaver.network.transport import start_udp_server
 
+
 @dataclass
 class MeshNode:
     host: str
@@ -46,11 +47,11 @@ class MeshNode:
 
         print(f"🚀 Sent PING to {peer_host}:{peer_port}")
 
-        async def start(self):
-            self.transport = await start_udp_server(
-                self.host,
-                self.port,
-                self.handle_message,
+    async def start(self):
+        self.transport = await start_udp_server(
+            self.host,
+            self.port,
+            self.handle_message,
         )
 
         print(
