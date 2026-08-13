@@ -30,7 +30,7 @@ class MeshNode:
 
         elif msg_type == "PONG":
             print(f"✅ PONG received from {message.get('from')} ({addr})")
-            
+
     async def send_ping(self, peer_host, peer_port):
         await asyncio.sleep(2)
 
@@ -45,3 +45,17 @@ class MeshNode:
         )
 
         print(f"🚀 Sent PING to {peer_host}:{peer_port}")
+
+        async def start(self):
+        self.transport = await start_udp_server(
+            self.host,
+            self.port,
+            self.handle_message,
+        )
+
+        print(
+            f"🌐 MeshNode {self.node_id[:8]} listening on "
+            f"{self.host}:{self.port}"
+        )
+
+        await asyncio.Event().wait()
