@@ -30,3 +30,18 @@ class MeshNode:
 
         elif msg_type == "PONG":
             print(f"✅ PONG received from {message.get('from')} ({addr})")
+            
+    async def send_ping(self, peer_host, peer_port):
+        await asyncio.sleep(2)
+
+        ping = {
+            "type": "PING",
+            "from": self.node_id[:8],
+        }
+
+        self.transport.sendto(
+            json.dumps(ping).encode(),
+            (peer_host, peer_port),
+        )
+
+        print(f"🚀 Sent PING to {peer_host}:{peer_port}")
