@@ -15,3 +15,12 @@ class UDPProtocol(asyncio.DatagramProtocol):
             asyncio.create_task(self.on_message(message, addr))
         except Exception as e:
             print(f"❌ Failed to process packet from {addr}: {e}")
+async def start_udp_server(host, port, on_message):
+    loop = asyncio.get_running_loop()
+
+    transport, _ = await loop.create_datagram_endpoint(
+        lambda: UDPProtocol(on_message),
+        local_addr=(host, port),
+    )
+
+    return transport
