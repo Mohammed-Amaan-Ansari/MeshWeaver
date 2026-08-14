@@ -3,7 +3,14 @@ from meshweaver.node import MeshNode
 
 
 async def main():
-    node = MeshNode("127.0.0.1", 9001)
+    node = MeshNode(
+        host="127.0.0.1",
+        port=9001,
+        bootstrap_peers=[
+            ("127.0.0.1", 9002),
+        ],
+    )
+
     await node.start()
 
 
