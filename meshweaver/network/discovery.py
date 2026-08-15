@@ -1,25 +1,29 @@
-import asyncio
 import json
 
 
-async def send_hello(node, peer):
-    message = {
-        "type": "HELLO",
-        "node_id": node.node_id[:8],
-        "port": node.port,
+HELLO = "HELLO"
+WELCOME = "WELCOME"
+
+
+def create_hello(node_id, port):
+    return {
+        "type": HELLO,
+        "node_id": node_id,
+        "port": port,
     }
 
-    node.transport.sendto(
-        json.dumps(message).encode(),
-        peer,
-    )
 
-    print(f"👋 HELLO sent to {peer}")
+def create_welcome(node_id, port):
+    return {
+        "type": WELCOME,
+        "node_id": node_id,
+        "port": port,
+    }
 
-async def discovery_loop(node, bootstrap_peers):
-    while True:
-        for peer in bootstrap_peers:
-            if peer != (node.host, node.port):
-                await send_hello(node, peer)
 
-        await asyncio.sleep(10)
+def encode_message(message):
+    return json.dumps(message).encode("utf-8")
+
+
+def decode_message(data):
+    return json.loads(data.decode("utf-8"))
