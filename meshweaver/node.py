@@ -26,7 +26,7 @@ class MeshNode:
 
         # Stores discovered peers
         self.peers = set()
-        
+
         self.peer_loads = {}
 
         # Initial peers supplied when starting the node
@@ -51,6 +51,10 @@ class MeshNode:
 
         # Periodically announce ourselves
         asyncio.create_task(self.discovery_loop())
+        asyncio.create_task(
+    gossip_loop(self)
+)
+        await asyncio.Event().wait()
 
         # Keep node alive
         await asyncio.Event().wait()
@@ -113,6 +117,11 @@ class MeshNode:
                 message,
                 addr
             )
+        elif message_type == GOSSIP:
+            await self.handle_gossip(
+        message,
+        addr,
+    )
 
     async def handle_hello(self, message, addr):
 
