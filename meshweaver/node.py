@@ -1,5 +1,8 @@
 import asyncio
-
+from meshweaver.network.gossip import (
+    GOSSIP,
+    gossip_loop,
+)
 from meshweaver.network.transport import start_udp_server
 from meshweaver.network.discovery import (
     HELLO,
@@ -23,6 +26,8 @@ class MeshNode:
 
         # Stores discovered peers
         self.peers = set()
+        
+        self.peer_loads = {}
 
         # Initial peers supplied when starting the node
         self.bootstrap_peers = bootstrap_peers or []
