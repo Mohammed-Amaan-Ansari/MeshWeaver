@@ -1,9 +1,7 @@
 import asyncio
-from meshweaver.network.gossip import (
-    GOSSIP,
-    gossip_loop,
-)
+
 from meshweaver.network.transport import start_udp_server
+
 from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
@@ -13,10 +11,21 @@ from meshweaver.network.discovery import (
     decode_message,
 )
 
+from meshweaver.network.gossip import (
+    GOSSIP,
+    gossip_loop,
+)
+
 
 class MeshNode:
 
-    def __init__(self, host, port, node_id, bootstrap_peers=None):
+    def __init__(
+        self,
+        host,
+        port,
+        node_id,
+        bootstrap_peers=None,
+    ):
 
         self.host = host
         self.port = port
@@ -24,37 +33,39 @@ class MeshNode:
 
         self.transport = None
 
-        # Stores discovered peers
+        # Known peers
         self.peers = set()
 
+        # CPU/RAM information of peers
         self.peer_loads = {}
 
-        # Initial peers supplied when starting the node
+        # Initial peers
         self.bootstrap_peers = bootstrap_peers or []
 
     async def start(self):
 
-        print()
         print("=" * 50)
-        print(f"Starting MeshWeaver Node")
+        print("Starting MeshWeaver Node")
         print(f"Node ID : {self.node_id}")
         print(f"Address : {self.host}:{self.port}")
         print("=" * 50)
 
         await start_udp_server(self)
 
-        # Give UDP server a moment to start
         await asyncio.sleep(1)
 
-        # Introduce ourselves to bootstrap peers
+        # Initial peer discovery
         await self.discover_peers()
 
-        # Periodically announce ourselves
-        asyncio.create_task(self.discovery_loop())
+        # Periodic discovery
         asyncio.create_task(
-    gossip_loop(self)
-)
-        await asyncio.Event().wait()
+            self.discovery_loop()
+        )
+
+        # Periodic CPU/RAM gossip
+        asyncio.create_task(
+            gossip_loop(self)
+        )
 
         # Keep node alive
         await asyncio.Event().wait()
@@ -63,7 +74,7 @@ class MeshNode:
 
         message = create_hello(
             self.node_id,
-            self.port
+            self.port,
         )
 
         data = encode_message(message)
@@ -72,12 +83,12 @@ class MeshNode:
 
             self.transport.sendto(
                 data,
-                peer
+                peer,
             )
 
             print(
-                f"[{self.node_id[:8]}] "
-                f"HELLO sent to {peer}"
+                f"[{self.node_id}] "
+                f"HELLO → {peer}"
             )
 
     async def discovery_loop(self):
@@ -91,13 +102,14 @@ class MeshNode:
     async def handle_message(self, data, addr):
 
         try:
+
             message = decode_message(data)
 
         except Exception as exc:
 
             print(
-                f"[{self.node_id[:8]}] "
-                f"Invalid message from {addr}: {exc}"
+                f"[{self.node_id}] "
+                f"Invalid message: {exc}"
             )
 
             return
@@ -108,20 +120,22 @@ class MeshNode:
 
             await self.handle_hello(
                 message,
-                addr
+                addr,
             )
 
         elif message_type == WELCOME:
 
             await self.handle_welcome(
                 message,
-                addr
+                addr,
             )
+
         elif message_type == GOSSIP:
+
             await self.handle_gossip(
-        message,
-        addr,
-    )
+                message,
+                addr,
+            )
 
     async def handle_hello(self, message, addr):
 
@@ -130,30 +144,27 @@ class MeshNode:
         if peer_id == self.node_id:
             return
 
-        new_peer = addr not in self.peers
+        is_new_peer = addr not in self.peers
 
         self.peers.add(addr)
 
-        if new_peer:
+        if is_new_peer:
 
             print(
-                f"[{self.node_id[:8]}] "
-                f"Discovered peer: {peer_id[:8]} "
-                f"@ {addr}"
+                f"\n[{self.node_id}] "
+                f"Discovered peer: {peer_id}"
             )
 
             self.print_peers()
 
-        # Send WELCOME response
-
         response = create_welcome(
             self.node_id,
-            self.port
+            self.port,
         )
 
         self.transport.sendto(
             encode_message(response),
-            addr
+            addr,
         )
 
     async def handle_welcome(self, message, addr):
@@ -163,31 +174,51 @@ class MeshNode:
         if peer_id == self.node_id:
             return
 
-        new_peer = addr not in self.peers
+        is_new_peer = addr not in self.peers
 
         self.peers.add(addr)
 
-        if new_peer:
+        if is_new_peer:
 
             print(
-                f"[{self.node_id[:8]}] "
-                f"Connected with peer: {peer_id[:8]} "
-                f"@ {addr}"
+                f"\n[{self.node_id}] "
+                f"Connected with peer: {peer_id}"
             )
 
             self.print_peers()
 
+    async def handle_gossip(self, message, addr):
+
+        peer_id = message.get("node_id")
+        load = message.get("load")
+
+        if peer_id == self.node_id:
+            return
+
+        self.peer_loads[peer_id] = load
+
+        print(
+            f"\n[{self.node_id}] "
+            f"LOAD UPDATE from {peer_id}"
+        )
+
+        print(
+            f"   CPU : {load['cpu']}%"
+        )
+
+        print(
+            f"   RAM : {load['memory']}%"
+        )
+
     def print_peers(self):
 
         print(
-            f"\n[{self.node_id[:8]}] "
+            f"[{self.node_id}] "
             f"Known peers: {len(self.peers)}"
         )
 
-        for peer in self.peers:
+        for host, port in self.peers:
 
             print(
-                f"   └── {peer[0]}:{peer[1]}"
+                f"   └── {host}:{port}"
             )
-
-        print()
