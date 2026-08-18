@@ -11,7 +11,9 @@ def test_calculate_load_score():
         "memory": 40,
     }
 
-    score = calculate_load_score(load)
+    score = calculate_load_score(
+        load
+    )
 
     assert score == 30
 
@@ -19,6 +21,7 @@ def test_calculate_load_score():
 def test_select_best_peer():
 
     peer_loads = {
+
         "NODE_A": {
             "cpu": 20,
             "memory": 40,
@@ -35,6 +38,8 @@ def test_select_best_peer():
         },
     }
 
-    best_peer = select_best_peer(peer_loads)
+    best_peer = select_best_peer(
+        peer_loads
+    )
 
     assert best_peer == "NODE_C"

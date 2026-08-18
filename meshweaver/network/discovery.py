@@ -6,6 +6,7 @@ WELCOME = "WELCOME"
 
 
 def create_hello(node_id, port):
+
     return {
         "type": HELLO,
         "node_id": node_id,
@@ -14,6 +15,7 @@ def create_hello(node_id, port):
 
 
 def create_welcome(node_id, port):
+
     return {
         "type": WELCOME,
         "node_id": node_id,
@@ -22,8 +24,14 @@ def create_welcome(node_id, port):
 
 
 def encode_message(message):
-    return json.dumps(message).encode("utf-8")
+
+    return json.dumps(
+        message
+    ).encode("utf-8")
 
 
 def decode_message(data):
-    return json.loads(data.decode("utf-8"))
+
+    return json.loads(
+        data.decode("utf-8")
+    )

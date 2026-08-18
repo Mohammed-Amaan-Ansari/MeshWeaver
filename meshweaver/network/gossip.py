@@ -29,12 +29,17 @@ async def gossip_loop(node):
 
         await asyncio.sleep(5)
 
+        # No peers available
         if not node.peers:
             continue
 
-        message = create_gossip_message(node)
+        message = create_gossip_message(
+            node
+        )
 
-        data = encode_message(message)
+        data = encode_message(
+            message
+        )
 
         for peer in node.peers:
 
@@ -46,6 +51,8 @@ async def gossip_loop(node):
         print(
             f"[{node.node_id}] "
             f"GOSSIP sent | "
-            f"CPU: {message['load']['cpu']}% | "
-            f"RAM: {message['load']['memory']}%"
+            f"CPU: "
+            f"{message['load']['cpu']:.1f}% | "
+            f"RAM: "
+            f"{message['load']['memory']:.1f}%"
         )
