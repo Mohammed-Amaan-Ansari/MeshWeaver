@@ -3,6 +3,7 @@ import json
 
 HELLO = "HELLO"
 WELCOME = "WELCOME"
+TASK = "TASK"
 
 
 def create_hello(node_id, port):
