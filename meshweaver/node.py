@@ -9,14 +9,20 @@ from meshweaver.scheduler.load_balancer import (
 from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
+    TASK,
+    GOSSIP,
     create_hello,
     create_welcome,
     encode_message,
     decode_message,
 )
 
+from meshweaver.task.network import (
+    create_task_message,
+    extract_task,
+)
+
 from meshweaver.network.gossip import (
-    GOSSIP,
     gossip_loop,
 )
 
@@ -42,31 +48,32 @@ class MeshNode:
         self.peers = set()
 
         # CPU/RAM information received from peers
-        #
-        # Example:
-        # {
-        #     "NODE_B": {
-        #         "cpu": 20.5,
-        #         "memory": 40.2
-        #     }
-        # }
         self.peer_loads = {}
 
         # Initial peers used for discovery
-        self.bootstrap_peers = bootstrap_peers or []
+        self.bootstrap_peers = (
+            bootstrap_peers or []
+        )
+
+    # =========================================================
+    # START NODE
+    # =========================================================
 
     async def start(self):
 
         print("=" * 50)
         print("Starting MeshWeaver Node")
         print(f"Node ID : {self.node_id}")
-        print(f"Address : {self.host}:{self.port}")
+        print(
+            f"Address : "
+            f"{self.host}:{self.port}"
+        )
         print("=" * 50)
 
         # Start UDP server
         await start_udp_server(self)
 
-        # Give the UDP server time to start
+        # Give UDP server time to start
         await asyncio.sleep(1)
 
         # Initial peer discovery
@@ -85,9 +92,9 @@ class MeshNode:
         # Keep node alive
         await asyncio.Event().wait()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # PEER DISCOVERY
-    # ---------------------------------------------------------
+    # =========================================================
 
     async def discover_peers(self):
 
@@ -99,6 +106,9 @@ class MeshNode:
         data = encode_message(message)
 
         for peer in self.bootstrap_peers:
+
+            if self.transport is None:
+                return
 
             self.transport.sendto(
                 data,
@@ -118,15 +128,21 @@ class MeshNode:
 
             await self.discover_peers()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # MESSAGE HANDLING
-    # ---------------------------------------------------------
+    # =========================================================
 
-    async def handle_message(self, data, addr):
+    async def handle_message(
+        self,
+        data,
+        addr,
+    ):
 
         try:
 
-            message = decode_message(data)
+            message = decode_message(
+                data
+            )
 
         except Exception as exc:
 
@@ -137,7 +153,9 @@ class MeshNode:
 
             return
 
-        message_type = message.get("type")
+        message_type = message.get(
+            "type"
+        )
 
         if message_type == HELLO:
 
@@ -160,16 +178,24 @@ class MeshNode:
                 addr,
             )
 
+        elif message_type == TASK:
+
+            await self.handle_task(
+                message,
+                addr,
+            )
+
         else:
 
             print(
                 f"[{self.node_id}] "
-                f"Unknown message type: {message_type}"
+                f"Unknown message type: "
+                f"{message_type}"
             )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # HELLO
-    # ---------------------------------------------------------
+    # =========================================================
 
     async def handle_hello(
         self,
@@ -177,23 +203,26 @@ class MeshNode:
         addr,
     ):
 
-        peer_id = message.get("node_id")
+        peer_id = message.get(
+            "node_id"
+        )
 
         # Ignore our own message
         if peer_id == self.node_id:
             return
 
-        # Check whether this is a new peer
-        is_new_peer = addr not in self.peers
+        is_new_peer = (
+            addr not in self.peers
+        )
 
-        # Add peer
         self.peers.add(addr)
 
         if is_new_peer:
 
             print(
                 f"\n[{self.node_id}] "
-                f"Discovered peer: {peer_id}"
+                f"Discovered peer: "
+                f"{peer_id}"
             )
 
             self.print_peers()
@@ -205,13 +234,15 @@ class MeshNode:
         )
 
         self.transport.sendto(
-            encode_message(response),
+            encode_message(
+                response
+            ),
             addr,
         )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # WELCOME
-    # ---------------------------------------------------------
+    # =========================================================
 
     async def handle_welcome(
         self,
@@ -219,30 +250,33 @@ class MeshNode:
         addr,
     ):
 
-        peer_id = message.get("node_id")
+        peer_id = message.get(
+            "node_id"
+        )
 
         # Ignore ourselves
         if peer_id == self.node_id:
             return
 
-        # Check whether this is a new peer
-        is_new_peer = addr not in self.peers
+        is_new_peer = (
+            addr not in self.peers
+        )
 
-        # Add peer
         self.peers.add(addr)
 
         if is_new_peer:
 
             print(
                 f"\n[{self.node_id}] "
-                f"Connected with peer: {peer_id}"
+                f"Connected with peer: "
+                f"{peer_id}"
             )
 
             self.print_peers()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # GOSSIP
-    # ---------------------------------------------------------
+    # =========================================================
 
     async def handle_gossip(
         self,
@@ -250,64 +284,84 @@ class MeshNode:
         addr,
     ):
 
-        peer_id = message.get("node_id")
-        load = message.get("load")
+        peer_id = message.get(
+            "node_id"
+        )
+
+        load = message.get(
+            "load"
+        )
 
         # Ignore our own gossip
         if peer_id == self.node_id:
             return
 
         # Validate load information
-        if not isinstance(load, dict):
+        if not isinstance(
+            load,
+            dict,
+        ):
+
             print(
                 f"[{self.node_id}] "
-                f"Invalid load information from {peer_id}"
+                f"Invalid load information "
+                f"from {peer_id}"
             )
+
             return
 
-        if "cpu" not in load or "memory" not in load:
+        if (
+            "cpu" not in load
+            or "memory" not in load
+        ):
+
             print(
                 f"[{self.node_id}] "
-                f"Incomplete load information from {peer_id}"
+                f"Incomplete load information "
+                f"from {peer_id}"
             )
+
             return
 
         # Store peer load
-        self.peer_loads[peer_id] = load
+        self.peer_loads[
+            peer_id
+        ] = load
 
         print(
             f"\n[{self.node_id}] "
-            f"LOAD UPDATE from {peer_id}"
+            f"LOAD UPDATE from "
+            f"{peer_id}"
         )
 
         print(
-            f"   CPU : {load['cpu']:.1f}%"
+            f"   CPU : "
+            f"{load['cpu']:.1f}%"
         )
 
         print(
-            f"   RAM : {load['memory']:.1f}%"
+            f"   RAM : "
+            f"{load['memory']:.1f}%"
         )
 
-        # Display current load table
         self.print_peer_loads()
 
-    # ---------------------------------------------------------
+    # =========================================================
     # LOAD BALANCER
-    # ---------------------------------------------------------
+    # =========================================================
 
     def get_best_peer(self):
 
-        # No peer information available
         if not self.peer_loads:
 
             print(
                 f"[{self.node_id}] "
-                "No peer load information available."
+                "No peer load information "
+                "available."
             )
 
             return None
 
-        # Select peer with lowest load
         best_peer = select_best_peer(
             self.peer_loads
         )
@@ -322,24 +376,37 @@ class MeshNode:
     def print_peer_loads(self):
 
         print()
+
         print(
-            f"[{self.node_id}] PEER LOAD TABLE"
+            f"[{self.node_id}] "
+            f"PEER LOAD TABLE"
         )
 
         print("-" * 60)
 
         if not self.peer_loads:
 
-            print("No peer load information.")
+            print(
+                "No peer load information."
+            )
 
             print("-" * 60)
 
             return
 
-        for peer_id, load in self.peer_loads.items():
+        for peer_id, load in (
+            self.peer_loads.items()
+        ):
 
-            cpu = load.get("cpu", 100)
-            memory = load.get("memory", 100)
+            cpu = load.get(
+                "cpu",
+                100,
+            )
+
+            memory = load.get(
+                "memory",
+                100,
+            )
 
             score = (
                 cpu + memory
@@ -354,19 +421,148 @@ class MeshNode:
 
         print("-" * 60)
 
-    # ---------------------------------------------------------
+    # =========================================================
+    # TASK SENDING
+    # =========================================================
+
+    async def send_task(
+        self,
+        task,
+        peer_addr,
+    ):
+
+        if self.transport is None:
+
+            raise RuntimeError(
+                "Node UDP transport "
+                "is not running."
+            )
+
+        message = create_task_message(
+            self.node_id,
+            task,
+        )
+
+        data = encode_message(
+            message
+        )
+
+        self.transport.sendto(
+            data,
+            peer_addr,
+        )
+
+        print()
+
+        print(
+            f"[{self.node_id}] "
+            f"TASK SENT → "
+            f"{peer_addr}"
+        )
+
+        print(
+            f"Task ID: "
+            f"{task.task_id}"
+        )
+
+        print(
+            f"Function: "
+            f"{task.function_name}"
+        )
+
+    # =========================================================
+    # TASK RECEIVING
+    # =========================================================
+
+    async def handle_task(
+        self,
+        message,
+        addr,
+    ):
+
+        try:
+
+            task = extract_task(
+                message
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Failed to deserialize "
+                f"task: {exc}"
+            )
+
+            return
+
+        sender_id = message.get(
+            "sender_id"
+        )
+
+        print()
+
+        print("=" * 50)
+
+        print(
+            f"[{self.node_id}] "
+            f"TASK RECEIVED"
+        )
+
+        print("=" * 50)
+
+        print(
+            f"Task ID       : "
+            f"{task.task_id}"
+        )
+
+        print(
+            f"Function      : "
+            f"{task.function_name}"
+        )
+
+        print(
+            f"Arguments     : "
+            f"{task.args}"
+        )
+
+        print(
+            f"Keyword Args  : "
+            f"{task.kwargs}"
+        )
+
+        print(
+            f"Status        : "
+            f"{task.status.value}"
+        )
+
+        print(
+            f"Sender        : "
+            f"{sender_id}"
+        )
+
+        print(
+            f"Address       : "
+            f"{addr}"
+        )
+
+        print("=" * 50)
+
+    # =========================================================
     # PEER TABLE
-    # ---------------------------------------------------------
+    # =========================================================
 
     def print_peers(self):
 
         print(
             f"[{self.node_id}] "
-            f"Known peers: {len(self.peers)}"
+            f"Known peers: "
+            f"{len(self.peers)}"
         )
 
         for host, port in self.peers:
 
             print(
-                f"   └── {host}:{port}"
+                f"   └── "
+                f"{host}:{port}"
             )
