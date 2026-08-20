@@ -1,4 +1,5 @@
 from meshweaver.task.model import Task
+
 from meshweaver.task.serializer import (
     serialize_task,
     deserialize_task,
@@ -9,12 +10,10 @@ def create_task_message(
     sender_id: str,
     task: Task,
 ):
-    """
-    Create a network message containing
-    a serialized Task.
-    """
 
-    task_data = serialize_task(task)
+    task_data = serialize_task(
+        task
+    )
 
     return {
         "type": "TASK",
@@ -23,11 +22,9 @@ def create_task_message(
     }
 
 
-def extract_task(message) -> Task:
-    """
-    Extract and deserialize a Task from
-    a network message.
-    """
+def extract_task(
+    message,
+) -> Task:
 
     task_data = bytes.fromhex(
         message["task_data"]
