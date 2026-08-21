@@ -10,7 +10,6 @@ from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
     TASK,
-    GOSSIP,
     create_hello,
     create_welcome,
     encode_message,
@@ -23,6 +22,7 @@ from meshweaver.task.network import (
 )
 
 from meshweaver.network.gossip import (
+    GOSSIP,
     gossip_loop,
 )
 

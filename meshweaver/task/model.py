@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 
@@ -22,6 +22,8 @@ class Task:
 
     function_name: str = ""
 
+    function: Callable | None = None
+
     args: tuple = ()
 
     kwargs: dict = field(
@@ -36,7 +38,10 @@ class Task:
 
     error: str | None = None
 
-    def assign(self, peer_id: str):
+    def assign(
+        self,
+        peer_id: str,
+    ):
 
         self.assigned_peer = peer_id
         self.status = TaskStatus.ASSIGNED
@@ -45,12 +50,18 @@ class Task:
 
         self.status = TaskStatus.RUNNING
 
-    def complete(self, result):
+    def complete(
+        self,
+        result,
+    ):
 
         self.result = result
         self.status = TaskStatus.COMPLETED
 
-    def fail(self, error):
+    def fail(
+        self,
+        error,
+    ):
 
         self.error = str(error)
         self.status = TaskStatus.FAILED
