@@ -478,29 +478,29 @@ class MeshNode:
     # TASK RECEIVING
     # =========================================================
 
-    async def handle_task(
+async def handle_task(
     self,
     message,
     addr,
 ):
-        try:
+    try:
 
         # Deserialize task
-            task = extract_task(
+        task = extract_task(
             message
         )
 
-        except Exception as exc:
+    except Exception as exc:
 
-            print(
+        print(
             f"[{self.node_id}] "
             f"Failed to deserialize "
             f"task: {exc}"
         )
 
-            return
+        return
 
-        sender_id = message.get(
+    sender_id = message.get(
         "sender_id"
     )
 
