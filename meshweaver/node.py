@@ -21,6 +21,10 @@ from meshweaver.task.network import (
     extract_task,
 )
 
+from meshweaver.task.executor import (
+    execute_task,
+)
+
 from meshweaver.network.gossip import (
     GOSSIP,
     gossip_loop,
@@ -475,78 +479,113 @@ class MeshNode:
     # =========================================================
 
     async def handle_task(
-        self,
-        message,
-        addr,
-    ):
-
+    self,
+    message,
+    addr,
+):
         try:
 
+        # Deserialize task
             task = extract_task(
-                message
-            )
+            message
+        )
 
         except Exception as exc:
 
             print(
-                f"[{self.node_id}] "
-                f"Failed to deserialize "
-                f"task: {exc}"
-            )
+            f"[{self.node_id}] "
+            f"Failed to deserialize "
+            f"task: {exc}"
+        )
 
             return
 
         sender_id = message.get(
-            "sender_id"
-        )
+        "sender_id"
+    )
 
-        print()
+    print()
 
-        print("=" * 50)
+    print("=" * 50)
+
+    print(
+        f"[{self.node_id}] "
+        f"TASK RECEIVED"
+    )
+
+    print("=" * 50)
+
+    print(
+        f"Task ID      : "
+        f"{task.task_id}"
+    )
+
+    print(
+        f"Function     : "
+        f"{task.function_name}"
+    )
+
+    print(
+        f"Arguments    : "
+        f"{task.args}"
+    )
+
+    print(
+        f"Status       : "
+        f"{task.status.value}"
+    )
+
+    print(
+        f"Sender       : "
+        f"{sender_id}"
+    )
+
+    print("=" * 50)
+
+    # -------------------------------------------------
+    # EXECUTE TASK
+    # -------------------------------------------------
+
+    print(
+        f"[{self.node_id}] "
+        f"Executing task..."
+    )
+
+    task = execute_task(
+        task
+    )
+
+    # -------------------------------------------------
+    # RESULT
+    # -------------------------------------------------
+
+    print()
+
+    print(
+        f"[{self.node_id}] "
+        f"TASK FINISHED"
+    )
+
+    print(
+        f"Status : "
+        f"{task.status.value}"
+    )
+
+    if task.status.value == "COMPLETED":
 
         print(
-            f"[{self.node_id}] "
-            f"TASK RECEIVED"
+            f"Result : "
+            f"{task.result}"
         )
 
-        print("=" * 50)
+    else:
 
         print(
-            f"Task ID       : "
-            f"{task.task_id}"
+            f"Error  : "
+            f"{task.error}"
         )
 
-        print(
-            f"Function      : "
-            f"{task.function_name}"
-        )
-
-        print(
-            f"Arguments     : "
-            f"{task.args}"
-        )
-
-        print(
-            f"Keyword Args  : "
-            f"{task.kwargs}"
-        )
-
-        print(
-            f"Status        : "
-            f"{task.status.value}"
-        )
-
-        print(
-            f"Sender        : "
-            f"{sender_id}"
-        )
-
-        print(
-            f"Address       : "
-            f"{addr}"
-        )
-
-        print("=" * 50)
+    print("=" * 50)
 
     # =========================================================
     # PEER TABLE
