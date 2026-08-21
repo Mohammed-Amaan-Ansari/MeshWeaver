@@ -9,6 +9,14 @@ from meshweaver.network.transport import (
 )
 
 
+def add(
+    a,
+    b,
+):
+
+    return a + b
+
+
 async def main():
 
     node = MeshNode(
@@ -17,7 +25,7 @@ async def main():
         node_id="TASK_SENDER",
     )
 
-    # Start UDP server
+    # Start sender UDP server
     await start_udp_server(
         node
     )
@@ -27,16 +35,22 @@ async def main():
     # Create task
     task = Task(
         function_name="add",
+        function=add,
         args=(10, 20),
     )
 
-    # Send task to Node B
+    print(
+        f"Created task: "
+        f"{task.task_id}"
+    )
+
+    # Send to Node B
     await node.send_task(
         task,
         ("127.0.0.1", 9002),
     )
 
-    # Give UDP time to send
+    # Give network time to send
     await asyncio.sleep(2)
 
 
