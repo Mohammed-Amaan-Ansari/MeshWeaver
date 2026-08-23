@@ -25,7 +25,7 @@ async def main():
         node_id="TASK_SENDER",
     )
 
-    # Start sender UDP server
+    # Start UDP server
     await start_udp_server(
         node
     )
@@ -39,19 +39,57 @@ async def main():
         args=(10, 20),
     )
 
+    print()
     print(
-        f"Created task: "
+        "Creating remote task..."
+    )
+
+    print(
+        f"Task ID : "
         f"{task.task_id}"
     )
 
-    # Send to Node B
+    # Send task
     await node.send_task(
         task,
         ("127.0.0.1", 9002),
     )
 
-    # Give network time to send
-    await asyncio.sleep(2)
+    # Wait for result
+    print()
+    print(
+        "Waiting for result..."
+    )
+
+    await asyncio.sleep(5)
+
+    # Display stored result
+    result = node.task_results.get(
+        task.task_id
+    )
+
+    if result:
+
+        print()
+        print(
+            "FINAL RESULT"
+        )
+
+        print(
+            f"Status : "
+            f"{result['status']}"
+        )
+
+        print(
+            f"Result : "
+            f"{result['result']}"
+        )
+
+    else:
+
+        print(
+            "No result received."
+        )
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ async def main():
         port=9002,
         node_id="NODE_B",
         bootstrap_peers=[
-            ("127.0.0.1", 9001),
+            ("127.0.0.1", 9001)
         ],
     )
 
@@ -19,4 +19,12 @@ async def main():
 
 if __name__ == "__main__":
 
-    asyncio.run(main())
+    try:
+
+        asyncio.run(main())
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nNODE_B stopped."
+        )

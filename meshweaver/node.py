@@ -1,6 +1,8 @@
 import asyncio
 
-from meshweaver.network.transport import start_udp_server
+from meshweaver.network.transport import (
+    start_udp_server,
+)
 
 from meshweaver.scheduler.load_balancer import (
     select_best_peer,
@@ -10,10 +12,17 @@ from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
     TASK,
+    RESULT,
     create_hello,
     create_welcome,
+    create_result,
     encode_message,
     decode_message,
+)
+
+from meshweaver.network.gossip import (
+    GOSSIP,
+    gossip_loop,
 )
 
 from meshweaver.task.network import (
@@ -23,11 +32,6 @@ from meshweaver.task.network import (
 
 from meshweaver.task.executor import (
     execute_task,
-)
-
-from meshweaver.network.gossip import (
-    GOSSIP,
-    gossip_loop,
 )
 
 
@@ -54,10 +58,13 @@ class MeshNode:
         # CPU/RAM information received from peers
         self.peer_loads = {}
 
-        # Initial peers used for discovery
+        # Initial peers
         self.bootstrap_peers = (
             bootstrap_peers or []
         )
+
+        # Results of tasks submitted by this node
+        self.task_results = {}
 
     # =========================================================
     # START NODE
@@ -77,24 +84,34 @@ class MeshNode:
         # Start UDP server
         await start_udp_server(self)
 
-        # Give UDP server time to start
         await asyncio.sleep(1)
 
-        # Initial peer discovery
+        # Initial discovery
         await self.discover_peers()
 
-        # Periodic peer discovery
+        # Periodic discovery
         asyncio.create_task(
             self.discovery_loop()
         )
 
-        # Periodic CPU/RAM gossip
+        # Periodic gossip
         asyncio.create_task(
             gossip_loop(self)
         )
 
         # Keep node alive
-        await asyncio.Event().wait()
+        try:
+
+            await asyncio.Event().wait()
+
+        except asyncio.CancelledError:
+
+            print(
+                f"\n[{self.node_id}] "
+                "Node stopped."
+            )
+
+            raise
 
     # =========================================================
     # PEER DISCOVERY
@@ -102,17 +119,20 @@ class MeshNode:
 
     async def discover_peers(self):
 
+        if self.transport is None:
+
+            return
+
         message = create_hello(
             self.node_id,
             self.port,
         )
 
-        data = encode_message(message)
+        data = encode_message(
+            message
+        )
 
         for peer in self.bootstrap_peers:
-
-            if self.transport is None:
-                return
 
             self.transport.sendto(
                 data,
@@ -189,6 +209,13 @@ class MeshNode:
                 addr,
             )
 
+        elif message_type == RESULT:
+
+            await self.handle_result(
+                message,
+                addr,
+            )
+
         else:
 
             print(
@@ -211,8 +238,8 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore our own message
         if peer_id == self.node_id:
+
             return
 
         is_new_peer = (
@@ -231,16 +258,13 @@ class MeshNode:
 
             self.print_peers()
 
-        # Send WELCOME response
         response = create_welcome(
             self.node_id,
             self.port,
         )
 
         self.transport.sendto(
-            encode_message(
-                response
-            ),
+            encode_message(response),
             addr,
         )
 
@@ -258,8 +282,8 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore ourselves
         if peer_id == self.node_id:
+
             return
 
         is_new_peer = (
@@ -296,11 +320,10 @@ class MeshNode:
             "load"
         )
 
-        # Ignore our own gossip
         if peer_id == self.node_id:
+
             return
 
-        # Validate load information
         if not isinstance(
             load,
             dict,
@@ -327,7 +350,6 @@ class MeshNode:
 
             return
 
-        # Store peer load
         self.peer_loads[
             peer_id
         ] = load
@@ -372,7 +394,8 @@ class MeshNode:
 
         print(
             f"[{self.node_id}] "
-            f"Best peer: {best_peer}"
+            f"Best peer: "
+            f"{best_peer}"
         )
 
         return best_peer
@@ -426,7 +449,7 @@ class MeshNode:
         print("-" * 60)
 
     # =========================================================
-    # TASK SENDING
+    # SEND TASK
     # =========================================================
 
     async def send_task(
@@ -441,6 +464,11 @@ class MeshNode:
                 "Node UDP transport "
                 "is not running."
             )
+
+        # Mark task as assigned
+        task.assign(
+            f"{peer_addr[0]}:{peer_addr[1]}"
+        )
 
         message = create_task_message(
             self.node_id,
@@ -458,137 +486,243 @@ class MeshNode:
 
         print()
 
-        print(
-            f"[{self.node_id}] "
-            f"TASK SENT → "
-            f"{peer_addr}"
-        )
+        print("=" * 50)
 
         print(
-            f"Task ID: "
+            f"[{self.node_id}] "
+            f"TASK SENT"
+        )
+
+        print("=" * 50)
+
+        print(
+            f"Task ID  : "
             f"{task.task_id}"
         )
 
         print(
-            f"Function: "
+            f"Function : "
             f"{task.function_name}"
         )
 
-    # =========================================================
-    # TASK RECEIVING
-    # =========================================================
-
-async def handle_task(
-    self,
-    message,
-    addr,
-):
-    try:
-
-        # Deserialize task
-        task = extract_task(
-            message
+        print(
+            f"Target   : "
+            f"{peer_addr}"
         )
 
-    except Exception as exc:
+        print("=" * 50)
+
+    # =========================================================
+    # RECEIVE TASK
+    # =========================================================
+
+    async def handle_task(
+        self,
+        message,
+        addr,
+    ):
+
+        try:
+
+            task = extract_task(
+                message
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Failed to deserialize "
+                f"task: {exc}"
+            )
+
+            return
+
+        sender_id = message.get(
+            "sender_id"
+        )
+
+        print()
+
+        print("=" * 50)
 
         print(
             f"[{self.node_id}] "
-            f"Failed to deserialize "
-            f"task: {exc}"
+            f"TASK RECEIVED"
         )
 
-        return
-
-    sender_id = message.get(
-        "sender_id"
-    )
-
-    print()
-
-    print("=" * 50)
-
-    print(
-        f"[{self.node_id}] "
-        f"TASK RECEIVED"
-    )
-
-    print("=" * 50)
-
-    print(
-        f"Task ID      : "
-        f"{task.task_id}"
-    )
-
-    print(
-        f"Function     : "
-        f"{task.function_name}"
-    )
-
-    print(
-        f"Arguments    : "
-        f"{task.args}"
-    )
-
-    print(
-        f"Status       : "
-        f"{task.status.value}"
-    )
-
-    print(
-        f"Sender       : "
-        f"{sender_id}"
-    )
-
-    print("=" * 50)
-
-    # -------------------------------------------------
-    # EXECUTE TASK
-    # -------------------------------------------------
-
-    print(
-        f"[{self.node_id}] "
-        f"Executing task..."
-    )
-
-    task = execute_task(
-        task
-    )
-
-    # -------------------------------------------------
-    # RESULT
-    # -------------------------------------------------
-
-    print()
-
-    print(
-        f"[{self.node_id}] "
-        f"TASK FINISHED"
-    )
-
-    print(
-        f"Status : "
-        f"{task.status.value}"
-    )
-
-    if task.status.value == "COMPLETED":
+        print("=" * 50)
 
         print(
-            f"Result : "
-            f"{task.result}"
+            f"Task ID      : "
+            f"{task.task_id}"
         )
-
-    else:
 
         print(
-            f"Error  : "
-            f"{task.error}"
+            f"Function     : "
+            f"{task.function_name}"
         )
 
-    print("=" * 50)
+        print(
+            f"Arguments    : "
+            f"{task.args}"
+        )
+
+        print(
+            f"Sender       : "
+            f"{sender_id}"
+        )
+
+        print("=" * 50)
+
+        # Execute
+        print(
+            f"[{self.node_id}] "
+            f"Executing task..."
+        )
+
+        task = execute_task(
+            task
+        )
+
+        print()
+
+        print(
+            f"[{self.node_id}] "
+            f"TASK FINISHED"
+        )
+
+        print(
+            f"Status : "
+            f"{task.status.value}"
+        )
+
+        if (
+            task.status.value
+            == "COMPLETED"
+        ):
+
+            print(
+                f"Result : "
+                f"{task.result}"
+            )
+
+        else:
+
+            print(
+                f"Error  : "
+                f"{task.error}"
+            )
+
+        print("=" * 50)
+
+        # Send result to sender
+        result_message = create_result(
+            sender_id=self.node_id,
+            task_id=task.task_id,
+            status=task.status.value,
+            result=task.result,
+            error=task.error,
+        )
+
+        self.transport.sendto(
+            encode_message(
+                result_message
+            ),
+            addr,
+        )
+
+        print(
+            f"[{self.node_id}] "
+            f"RESULT SENT → "
+            f"{addr}"
+        )
 
     # =========================================================
-    # PEER TABLE
+    # RECEIVE RESULT
+    # =========================================================
+
+    async def handle_result(
+        self,
+        message,
+        addr,
+    ):
+
+        task_id = message.get(
+            "task_id"
+        )
+
+        status = message.get(
+            "status"
+        )
+
+        result = message.get(
+            "result"
+        )
+
+        error = message.get(
+            "error"
+        )
+
+        sender_id = message.get(
+            "sender_id"
+        )
+
+        # Store result
+        self.task_results[
+            task_id
+        ] = {
+            "status": status,
+            "result": result,
+            "error": error,
+            "sender_id": sender_id,
+            "address": addr,
+        }
+
+        print()
+
+        print("=" * 50)
+
+        print(
+            f"[{self.node_id}] "
+            f"TASK RESULT RECEIVED"
+        )
+
+        print("=" * 50)
+
+        print(
+            f"Task ID : "
+            f"{task_id}"
+        )
+
+        print(
+            f"From    : "
+            f"{sender_id}"
+        )
+
+        print(
+            f"Status  : "
+            f"{status}"
+        )
+
+        if status == "COMPLETED":
+
+            print(
+                f"Result  : "
+                f"{result}"
+            )
+
+        else:
+
+            print(
+                f"Error   : "
+                f"{error}"
+            )
+
+        print("=" * 50)
+
+    # =========================================================
+    # PEERS
     # =========================================================
 
     def print_peers(self):
