@@ -5,10 +5,6 @@ from meshweaver.network.transport import (
     start_udp_server,
 )
 
-from meshweaver.scheduler.load_balancer import (
-    select_best_peer,
-)
-
 from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
@@ -31,6 +27,10 @@ from meshweaver.network.heartbeat import (
     heartbeat_loop,
     failure_detection_loop,
     mark_peer_alive,
+)
+
+from meshweaver.scheduler.load_balancer import (
+    select_best_peer,
 )
 
 from meshweaver.task.network import (
@@ -67,14 +67,30 @@ class MeshNode:
         # PEERS
         # =====================================================
 
-        # Known peer addresses
+        # Set of known peer addresses.
+        #
+        # Example:
+        #
+        # {
+        #     ("127.0.0.1", 9002),
+        #     ("127.0.0.1", 9003)
+        # }
+        #
         self.peers = set()
 
         # =====================================================
         # PEER LOAD INFORMATION
         # =====================================================
 
-        
+        # Example:
+        #
+        # {
+        #     "NODE_B": {
+        #         "cpu": 20.5,
+        #         "memory": 40.2
+        #     }
+        # }
+        #
         self.peer_loads = {}
 
         # =====================================================
@@ -89,17 +105,47 @@ class MeshNode:
         # TASK RESULTS
         # =====================================================
 
+        # Completed task results.
+        #
+        # {
+        #     "task-id": {
+        #         "status": "COMPLETED",
+        #         "result": 123,
+        #         ...
+        #     }
+        # }
+        #
         self.task_results = {}
 
+        # =====================================================
+        # PENDING TASKS
+        # =====================================================
+
+        # Tasks currently assigned to remote peers.
+        #
+        # {
+        #     "task-id": {
+        #         "task": task_object,
+        #         "peer_id": "NODE_B",
+        #         "peer_addr": ("127.0.0.1", 9002)
+        #     }
+        # }
+        #
         self.pending_tasks = {}
 
         # =====================================================
-        # HEARTBEAT TRACKING
+        # HEARTBEAT / FAILURE DETECTION
         # =====================================================
- 
+
+        # Last heartbeat received from each peer.
+        #
+        # {
+        #     "NODE_B": timestamp
+        # }
+        #
         self.peer_last_seen = {}
 
-        # Peer ID -> network address
+        # Peer ID -> address.
         #
         # {
         #     "NODE_B": ("127.0.0.1", 9002)
@@ -107,7 +153,7 @@ class MeshNode:
         #
         self.peer_addresses = {}
 
-        # Peers currently considered offline
+        # Peers that are currently considered offline.
         self.dead_peers = set()
 
     # =========================================================
@@ -116,7 +162,7 @@ class MeshNode:
 
     async def start(self):
 
-        print("=" * 50)
+        print("=" * 60)
         print("Starting MeshWeaver Node")
         print(
             f"Node ID : {self.node_id}"
@@ -125,7 +171,7 @@ class MeshNode:
             f"Address : "
             f"{self.host}:{self.port}"
         )
-        print("=" * 50)
+        print("=" * 60)
 
         # -----------------------------------------------------
         # Start UDP server
@@ -135,7 +181,7 @@ class MeshNode:
             self
         )
 
-        # Give the server time to start
+        # Give the UDP server time to initialize.
         await asyncio.sleep(1)
 
         # -----------------------------------------------------
@@ -145,32 +191,20 @@ class MeshNode:
         await self.discover_peers()
 
         # -----------------------------------------------------
-        # Periodic peer discovery
+        # Background services
         # -----------------------------------------------------
 
         asyncio.create_task(
             self.discovery_loop()
         )
 
-        # -----------------------------------------------------
-        # CPU/RAM gossip
-        # -----------------------------------------------------
-
         asyncio.create_task(
             gossip_loop(self)
         )
 
-        # -----------------------------------------------------
-        # Heartbeat sender
-        # -----------------------------------------------------
-
         asyncio.create_task(
             heartbeat_loop(self)
         )
-
-        # -----------------------------------------------------
-        # Failure detector
-        # -----------------------------------------------------
 
         asyncio.create_task(
             failure_detection_loop(self)
@@ -204,7 +238,9 @@ class MeshNode:
     async def discover_peers(self):
 
         if self.transport is None:
+            return
 
+        if not self.bootstrap_peers:
             return
 
         message = create_hello(
@@ -218,15 +254,32 @@ class MeshNode:
 
         for peer in self.bootstrap_peers:
 
-            self.transport.sendto(
-                data,
-                peer,
-            )
+            # Do not send HELLO to ourselves.
+            if peer == (
+                self.host,
+                self.port,
+            ):
+                continue
 
-            print(
-                f"[{self.node_id}] "
-                f"HELLO → {peer}"
-            )
+            try:
+
+                self.transport.sendto(
+                    data,
+                    peer,
+                )
+
+                print(
+                    f"[{self.node_id}] "
+                    f"HELLO → {peer}"
+                )
+
+            except Exception as exc:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"Failed to send HELLO "
+                    f"to {peer}: {exc}"
+                )
 
     async def discovery_loop(self):
 
@@ -357,32 +410,29 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore our own message
+        # Ignore ourselves.
         if peer_id == self.node_id:
-
             return
 
-        # Check whether this is a new peer
         is_new_peer = (
             addr not in self.peers
         )
 
-        # Add peer
+        # Register peer.
         self.peers.add(
             addr
         )
 
-        # Save peer address
         self.peer_addresses[
             peer_id
         ] = addr
 
-        # Consider peer alive
         self.peer_last_seen[
             peer_id
         ] = time.time()
 
-        # If previously dead, mark alive
+        # If peer was previously offline,
+        # mark it online again.
         if peer_id in self.dead_peers:
 
             self.dead_peers.remove(
@@ -406,7 +456,7 @@ class MeshNode:
             self.print_peers()
 
         # -----------------------------------------------------
-        # Send WELCOME response
+        # Send WELCOME
         # -----------------------------------------------------
 
         response = create_welcome(
@@ -414,12 +464,22 @@ class MeshNode:
             self.port,
         )
 
-        self.transport.sendto(
-            encode_message(
-                response
-            ),
-            addr,
-        )
+        try:
+
+            self.transport.sendto(
+                encode_message(
+                    response
+                ),
+                addr,
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Failed to send WELCOME: "
+                f"{exc}"
+            )
 
     # =========================================================
     # WELCOME
@@ -435,32 +495,27 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore ourselves
+        # Ignore ourselves.
         if peer_id == self.node_id:
-
             return
 
-        # Check whether this is a new peer
         is_new_peer = (
             addr not in self.peers
         )
 
-        # Add peer
         self.peers.add(
             addr
         )
 
-        # Save peer address
         self.peer_addresses[
             peer_id
         ] = addr
 
-        # Consider peer alive
         self.peer_last_seen[
             peer_id
         ] = time.time()
 
-        # Remove from dead peers
+        # Peer has responded, so it is alive.
         if peer_id in self.dead_peers:
 
             self.dead_peers.remove(
@@ -497,12 +552,16 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore our own heartbeat
+        # Ignore our own heartbeat.
         if peer_id == self.node_id:
-
             return
 
-        # Update heartbeat information
+        # Register the peer if necessary.
+        self.peers.add(
+            addr
+        )
+
+        # Update heartbeat state.
         mark_peer_alive(
             self,
             peer_id,
@@ -533,12 +592,11 @@ class MeshNode:
             "load"
         )
 
-        # Ignore our own gossip
+        # Ignore ourselves.
         if peer_id == self.node_id:
-
             return
 
-        # Validate load information
+        # Validate load.
         if not isinstance(
             load,
             dict,
@@ -552,7 +610,6 @@ class MeshNode:
 
             return
 
-        # Validate CPU/RAM
         if (
             "cpu" not in load
             or "memory" not in load
@@ -566,7 +623,28 @@ class MeshNode:
 
             return
 
-        # Store peer load
+        # Register peer.
+        self.peers.add(
+            addr
+        )
+
+        self.peer_addresses[
+            peer_id
+        ] = addr
+
+        # Receiving gossip also proves
+        # that the peer is alive.
+        self.peer_last_seen[
+            peer_id
+        ] = time.time()
+
+        if peer_id in self.dead_peers:
+
+            self.dead_peers.remove(
+                peer_id
+            )
+
+        # Store load.
         self.peer_loads[
             peer_id
         ] = load
@@ -605,7 +683,7 @@ class MeshNode:
 
             return None
 
-        # Remove offline peers
+        # Only online peers can receive tasks.
         available_loads = {
             peer_id: load
             for peer_id, load
@@ -637,13 +715,12 @@ class MeshNode:
     def print_peer_loads(self):
 
         print()
-
         print(
             f"[{self.node_id}] "
             f"PEER LOAD TABLE"
         )
 
-        print("-" * 70)
+        print("-" * 75)
 
         if not self.peer_loads:
 
@@ -651,7 +728,7 @@ class MeshNode:
                 "No peer load information."
             )
 
-            print("-" * 70)
+            print("-" * 75)
 
             return
 
@@ -675,127 +752,167 @@ class MeshNode:
 
             status = (
                 "OFFLINE"
-                if peer_id
-                in self.dead_peers
+                if peer_id in self.dead_peers
                 else "ONLINE"
             )
 
             print(
-                f"{peer_id:10} "
+                f"{peer_id:12} "
                 f"CPU: {cpu:5.1f}% | "
                 f"RAM: {memory:5.1f}% | "
                 f"SCORE: {score:5.1f} | "
                 f"{status}"
             )
 
-        print("-" * 70)
+        print("-" * 75)
 
     # =========================================================
     # SEND TASK
     # =========================================================
 
     async def send_task(
-    self,
-    task,
-    peer_addr,
-):
-
-     if self.transport is None:
-        raise RuntimeError(
-            "Node UDP transport "
-            "is not running."
-        )
-
-    # ---------------------------------------------------------
-    # Assign task
-    # ---------------------------------------------------------
-
-        task.assign(
-        f"{peer_addr[0]}:"
-        f"{peer_addr[1]}"
-    )
-
-    # ---------------------------------------------------------
-    # Find peer ID from address
-    # ---------------------------------------------------------
-
-    peer_id = None
-
-    for known_peer_id, known_addr in (
-        self.peer_addresses.items()
+        self,
+        task,
+        peer_addr,
     ):
 
-        if known_addr == peer_addr:
-            peer_id = known_peer_id
+        if self.transport is None:
 
-            break
+            raise RuntimeError(
+                "Node UDP transport "
+                "is not running."
+            )
 
-    # ---------------------------------------------------------
-    # Create task message
-    # ---------------------------------------------------------
+        # -----------------------------------------------------
+        # Find peer ID
+        # -----------------------------------------------------
 
-    message = create_task_message(
-        self.node_id,
-        task,
-    )
+        peer_id = None
 
-    data = encode_message(
-        message
-    )
+        for known_peer_id, known_addr in (
+            self.peer_addresses.items()
+        ):
 
-    # ---------------------------------------------------------
-    # Send task
-    # ---------------------------------------------------------
+            if known_addr == peer_addr:
 
-    self.transport.sendto(
-        data,
-        peer_addr,
-    )
+                peer_id = known_peer_id
 
-    # ---------------------------------------------------------
-    # Track pending task
-    # ---------------------------------------------------------
+                break
 
-    self.pending_tasks[
-        task.task_id
-    ] = {
-        "task": task,
-        "peer_id": peer_id,
-        "peer_addr": peer_addr,
-    }
+        # If address is unknown, still allow
+        # sending but warn.
+        if peer_id is None:
 
-    print()
+            print(
+                f"[{self.node_id}] "
+                f"Warning: peer ID not found "
+                f"for {peer_addr}"
+            )
 
-    print("=" * 50)
+        # -----------------------------------------------------
+        # Do not send to known offline peer
+        # -----------------------------------------------------
 
-    print(
-        f"[{self.node_id}] "
-        f"TASK SENT"
-    )
+        if (
+            peer_id is not None
+            and peer_id in self.dead_peers
+        ):
 
-    print("=" * 50)
+            print(
+                f"[{self.node_id}] "
+                f"Cannot send task to "
+                f"offline peer "
+                f"{peer_id}"
+            )
 
-    print(
-        f"Task ID  : "
-        f"{task.task_id}"
-    )
+            return False
 
-    print(
-        f"Function : "
-        f"{task.function_name}"
-    )
+        # -----------------------------------------------------
+        # Assign task
+        # -----------------------------------------------------
 
-    print(
-        f"Target   : "
-        f"{peer_id}"
-    )
+        task.assign(
+            f"{peer_addr[0]}:"
+            f"{peer_addr[1]}"
+        )
 
-    print(
-        f"Address  : "
-        f"{peer_addr}"
-    )
+        # -----------------------------------------------------
+        # Create network message
+        # -----------------------------------------------------
 
-    print("=" * 50)
+        message = create_task_message(
+            self.node_id,
+            task,
+        )
+
+        data = encode_message(
+            message
+        )
+
+        # -----------------------------------------------------
+        # Send
+        # -----------------------------------------------------
+
+        try:
+
+            self.transport.sendto(
+                data,
+                peer_addr,
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Failed to send task: "
+                f"{exc}"
+            )
+
+            return False
+
+        # -----------------------------------------------------
+        # Track task
+        # -----------------------------------------------------
+
+        self.pending_tasks[
+            task.task_id
+        ] = {
+            "task": task,
+            "peer_id": peer_id,
+            "peer_addr": peer_addr,
+        }
+
+        print()
+        print("=" * 60)
+        print(
+            f"[{self.node_id}] "
+            f"TASK SENT"
+        )
+        print("=" * 60)
+
+        print(
+            f"Task ID  : "
+            f"{task.task_id}"
+        )
+
+        print(
+            f"Function : "
+            f"{task.function_name}"
+        )
+
+        print(
+            f"Target   : "
+            f"{peer_id}"
+        )
+
+        print(
+            f"Address  : "
+            f"{peer_addr}"
+        )
+
+        print("=" * 60)
+
+        return True
 
     # =========================================================
     # RECEIVE TASK
@@ -828,40 +945,39 @@ class MeshNode:
         )
 
         print()
-
-        print("=" * 50)
+        print("=" * 60)
 
         print(
             f"[{self.node_id}] "
             f"TASK RECEIVED"
         )
 
-        print("=" * 50)
+        print("=" * 60)
 
         print(
-            f"Task ID      : "
+            f"Task ID   : "
             f"{task.task_id}"
         )
 
         print(
-            f"Function     : "
+            f"Function  : "
             f"{task.function_name}"
         )
 
         print(
-            f"Arguments    : "
+            f"Arguments : "
             f"{task.args}"
         )
 
         print(
-            f"Sender       : "
+            f"Sender    : "
             f"{sender_id}"
         )
 
-        print("=" * 50)
+        print("=" * 60)
 
         # -----------------------------------------------------
-        # Execute task
+        # Execute
         # -----------------------------------------------------
 
         print(
@@ -869,12 +985,54 @@ class MeshNode:
             f"Executing task..."
         )
 
-        task = execute_task(
-            task
-        )
+        try:
+
+            task = execute_task(
+                task
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Task execution error: "
+                f"{exc}"
+            )
+
+            # Try to report execution failure.
+            try:
+
+                result_message = create_result(
+                    sender_id=self.node_id,
+                    task_id=task.task_id,
+                    status="FAILED",
+                    result=None,
+                    error=str(exc),
+                )
+
+                self.transport.sendto(
+                    encode_message(
+                        result_message
+                    ),
+                    addr,
+                )
+
+            except Exception as result_exc:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"Failed to send error "
+                    f"result: "
+                    f"{result_exc}"
+                )
+
+            return
+
+        # -----------------------------------------------------
+        # Display result
+        # -----------------------------------------------------
 
         print()
-
         print(
             f"[{self.node_id}] "
             f"TASK FINISHED"
@@ -902,7 +1060,7 @@ class MeshNode:
                 f"{task.error}"
             )
 
-        print("=" * 50)
+        print("=" * 60)
 
         # -----------------------------------------------------
         # Send result back
@@ -916,18 +1074,28 @@ class MeshNode:
             error=task.error,
         )
 
-        self.transport.sendto(
-            encode_message(
-                result_message
-            ),
-            addr,
-        )
+        try:
 
-        print(
-            f"[{self.node_id}] "
-            f"RESULT SENT → "
-            f"{addr}"
-        )
+            self.transport.sendto(
+                encode_message(
+                    result_message
+                ),
+                addr,
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"RESULT SENT → "
+                f"{addr}"
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Failed to send result: "
+                f"{exc}"
+            )
 
     # =========================================================
     # RECEIVE RESULT
@@ -959,7 +1127,10 @@ class MeshNode:
             "sender_id"
         )
 
+        # -----------------------------------------------------
         # Store result
+        # -----------------------------------------------------
+
         self.task_results[
             task_id
         ] = {
@@ -970,16 +1141,39 @@ class MeshNode:
             "address": addr,
         }
 
-        print()
+        # -----------------------------------------------------
+        # Completed tasks are no longer pending.
+        # -----------------------------------------------------
 
-        print("=" * 50)
+        if status == "COMPLETED":
+
+            self.pending_tasks.pop(
+                task_id,
+                None,
+            )
+
+        # Failed tasks can also be removed here.
+        #
+        # Day 7 reassignment is primarily based
+        # on peer failure rather than task execution
+        # failure.
+        #
+        elif status == "FAILED":
+
+            self.pending_tasks.pop(
+                task_id,
+                None,
+            )
+
+        print()
+        print("=" * 60)
 
         print(
             f"[{self.node_id}] "
             f"TASK RESULT RECEIVED"
         )
 
-        print("=" * 50)
+        print("=" * 60)
 
         print(
             f"Task ID : "
@@ -1010,7 +1204,11 @@ class MeshNode:
                 f"{error}"
             )
 
-        print("=" * 50)
+        print("=" * 60)
+
+    # =========================================================
+    # FAILED TASK REASSIGNMENT
+    # =========================================================
 
     async def reassign_failed_tasks(self):
 
@@ -1018,263 +1216,217 @@ class MeshNode:
 
             return
 
-    for task_id, task_info in list(
-        self.pending_tasks.items()
-    ):
+        # Work on a snapshot so the dictionary
+        # can safely change during reassignment.
+        pending_snapshot = list(
+            self.pending_tasks.items()
+        )
 
-        peer_id = task_info[
-            "peer_id"
-        ]
-
-        # -----------------------------------------------------
-        # Check whether assigned peer is dead
-        # -----------------------------------------------------
-
-        if (
-            peer_id is None
-            or peer_id not in self.dead_peers
+        for task_id, task_info in (
+            pending_snapshot
         ):
 
-            continue
+            peer_id = task_info.get(
+                "peer_id"
+            )
 
-        print()
+            # -------------------------------------------------
+            # We can only reassign if the assigned
+            # peer is known to be dead.
+            # -------------------------------------------------
 
-        print("=" * 60)
+            if peer_id is None:
 
-        print(
-            f"[{self.node_id}] "
-            f"FAILED PEER DETECTED"
-        )
+                continue
 
-        print(
-            f"Task      : "
-            f"{task_id}"
-        )
+            if peer_id not in self.dead_peers:
 
-        print(
-            f"Failed    : "
-            f"{peer_id}"
-        )
+                continue
 
-        print("=" * 60)
-
-        # -----------------------------------------------------
-        # Find another peer
-        # -----------------------------------------------------
-
-        new_peer_id = self.get_best_peer()
-
-        if new_peer_id is None:
+            print()
+            print("=" * 60)
 
             print(
                 f"[{self.node_id}] "
-                "No available peer "
-                "for reassignment."
+                f"FAILED PEER DETECTED"
             )
-
-            continue
-
-        # Do not select the failed peer
-        if new_peer_id in self.dead_peers:
 
             print(
-                f"[{self.node_id}] "
-                f"Selected peer "
-                f"{new_peer_id} "
-                f"is offline."
+                f"Task   : {task_id}"
             )
 
-            continue
+            print(
+                f"Failed : {peer_id}"
+            )
 
-        new_peer_addr = (
-            self.peer_addresses.get(
+            print("=" * 60)
+
+            # -------------------------------------------------
+            # Find another online peer.
+            # -------------------------------------------------
+
+            new_peer_id = self.get_best_peer()
+
+            if new_peer_id is None:
+
+                print(
+                    f"[{self.node_id}] "
+                    "No online peer available "
+                    "for task reassignment."
+                )
+
+                continue
+
+            # Safety check.
+            if (
                 new_peer_id
-            )
-        )
+                == peer_id
+            ):
 
-        if new_peer_addr is None:
+                print(
+                    f"[{self.node_id}] "
+                    f"Selected peer "
+                    f"{new_peer_id} "
+                    f"is the failed peer."
+                )
 
-            print(
-                f"[{self.node_id}] "
-                f"No address available "
-                f"for {new_peer_id}."
-            )
+                continue
 
-            continue
-
-        # -----------------------------------------------------
-        # Reassign
-        # -----------------------------------------------------
-
-        print(
-            f"[{self.node_id}] "
-            f"REASSIGNING TASK"
-        )
-
-        print(
-            f"   Task : {task_id}"
-        )
-
-        print(
-            f"   From : {peer_id}"
-        )
-
-        print(
-            f"   To   : {new_peer_id}"
-        )
-
-        # Remove old assignment
-        self.pending_tasks.pop(
-            task_id,
-            None
-        )
-
-        # Send task again
-        await self.send_task(
-            task_info["task"],
-            new_peer_addr,
-        )
-
-        print(
-            f"[{self.node_id}] "
-            f"TASK REASSIGNED SUCCESSFULLY"
-        )
-
-    async def reassign_failed_tasks(self):
-
-    if not self.pending_tasks:
-
-        return
-
-    for task_id, task_info in list(
-        self.pending_tasks.items()
-    ):
-
-        peer_id = task_info[
-            "peer_id"
-        ]
-
-        # -----------------------------------------------------
-        # Check whether assigned peer is dead
-        # -----------------------------------------------------
-
-        if (
-            peer_id is None
-            or peer_id not in self.dead_peers
-        ):
-
-            continue
-
-        print()
-
-        print("=" * 60)
-
-        print(
-            f"[{self.node_id}] "
-            f"FAILED PEER DETECTED"
-        )
-
-        print(
-            f"Task      : "
-            f"{task_id}"
-        )
-
-        print(
-            f"Failed    : "
-            f"{peer_id}"
-        )
-
-        print("=" * 60)
-
-        # -----------------------------------------------------
-        # Find another peer
-        # -----------------------------------------------------
-
-        new_peer_id = self.get_best_peer()
-
-        if new_peer_id is None:
-
-            print(
-                f"[{self.node_id}] "
-                "No available peer "
-                "for reassignment."
-            )
-
-            continue
-
-        # Do not select the failed peer
-        if new_peer_id in self.dead_peers:
-
-            print(
-                f"[{self.node_id}] "
-                f"Selected peer "
-                f"{new_peer_id} "
-                f"is offline."
-            )
-
-            continue
-
-        new_peer_addr = (
-            self.peer_addresses.get(
+            if (
                 new_peer_id
-            )
-        )
+                in self.dead_peers
+            ):
 
-        if new_peer_addr is None:
+                print(
+                    f"[{self.node_id}] "
+                    f"Selected peer "
+                    f"{new_peer_id} "
+                    f"is offline."
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # Find address.
+            # -------------------------------------------------
+
+            new_peer_addr = (
+                self.peer_addresses.get(
+                    new_peer_id
+                )
+            )
+
+            if new_peer_addr is None:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"No address known for "
+                    f"{new_peer_id}."
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # Get original task.
+            # -------------------------------------------------
+
+            task = task_info.get(
+                "task"
+            )
+
+            if task is None:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"Task object missing for "
+                    f"{task_id}."
+                )
+
+                # Remove broken pending entry.
+                self.pending_tasks.pop(
+                    task_id,
+                    None,
+                )
+
+                continue
 
             print(
                 f"[{self.node_id}] "
-                f"No address available "
-                f"for {new_peer_id}."
+                f"REASSIGNING TASK"
             )
 
-            continue
+            print(
+                f"   Task : "
+                f"{task_id}"
+            )
 
-        # -----------------------------------------------------
-        # Reassign
-        # -----------------------------------------------------
+            print(
+                f"   From : "
+                f"{peer_id}"
+            )
 
-        print(
-            f"[{self.node_id}] "
-            f"REASSIGNING TASK"
-        )
+            print(
+                f"   To   : "
+                f"{new_peer_id}"
+            )
 
-        print(
-            f"   Task : {task_id}"
-        )
+            # -------------------------------------------------
+            # Remove old assignment before sending.
+            # send_task() creates the new assignment.
+            # -------------------------------------------------
 
-        print(
-            f"   From : {peer_id}"
-        )
+            self.pending_tasks.pop(
+                task_id,
+                None,
+            )
 
-        print(
-            f"   To   : {new_peer_id}"
-        )
+            success = await self.send_task(
+                task,
+                new_peer_addr,
+            )
 
-        # Remove old assignment
-        self.pending_tasks.pop(
-            task_id,
-            None
-        )
+            if success:
 
-        # Send task again
-        await self.send_task(
-            task_info["task"],
-            new_peer_addr,
-        )
+                print(
+                    f"[{self.node_id}] "
+                    f"TASK REASSIGNED "
+                    f"SUCCESSFULLY"
+                )
 
-        print(
-            f"[{self.node_id}] "
-            f"TASK REASSIGNED SUCCESSFULLY"
-        )
+            else:
 
+                # Restore the pending task if
+                # reassignment failed.
+                self.pending_tasks[
+                    task_id
+                ] = task_info
+
+                print(
+                    f"[{self.node_id}] "
+                    f"TASK REASSIGNMENT FAILED"
+                )
+
+    # =========================================================
+    # TASK REASSIGNMENT LOOP
+    # =========================================================
 
     async def task_reassignment_loop(self):
 
         while True:
+
             await asyncio.sleep(3)
 
-            await self.reassign_failed_tasks()
+            try:
+
+                await self.reassign_failed_tasks()
+
+            except Exception as exc:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"Reassignment error: "
+                    f"{exc}"
+                )
 
     # =========================================================
     # PEER TABLE
@@ -1288,7 +1440,17 @@ class MeshNode:
             f"{len(self.peers)}"
         )
 
-        for host, port in self.peers:
+        if not self.peers:
+
+            print(
+                "   └── No peers"
+            )
+
+            return
+
+        for host, port in sorted(
+            self.peers
+        ):
 
             print(
                 f"   └── "
