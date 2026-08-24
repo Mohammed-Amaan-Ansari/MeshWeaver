@@ -2,9 +2,16 @@ import json
 
 
 HELLO = "HELLO"
+
 WELCOME = "WELCOME"
+
 TASK = "TASK"
+
 RESULT = "RESULT"
+
+GOSSIP = "GOSSIP"
+
+HEARTBEAT = "HEARTBEAT"
 
 
 def create_hello(
@@ -46,6 +53,16 @@ def create_result(
         "status": status,
         "result": result,
         "error": error,
+    }
+
+
+def create_heartbeat(
+    node_id,
+):
+
+    return {
+        "type": HEARTBEAT,
+        "node_id": node_id,
     }
 
 
