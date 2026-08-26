@@ -1,46 +1,33 @@
 import asyncio
-import time
 
-from meshweaver.network.transport import (
-    start_udp_server,
+from meshweaver.network.transport import start_udp_server
+
+from meshweaver.scheduler.load_balancer import (
+    select_best_peer,
 )
 
 from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
     TASK,
-    RESULT,
-    GOSSIP,
-    HEARTBEAT,
     create_hello,
     create_welcome,
-    create_result,
     encode_message,
     decode_message,
 )
 
-from meshweaver.network.gossip import (
-    gossip_loop,
-)
-
-from meshweaver.network.heartbeat import (
-    heartbeat_loop,
-    failure_detection_loop,
-    mark_peer_alive,
-)
-
-from meshweaver.scheduler.load_balancer import (
-    select_best_peer,
-)
-
 from meshweaver.task.network import (
-    create_task_message,
     extract_task,
 )
 
-from meshweaver.task.executor import (
-    execute_task,
+from meshweaver.network.gossip import (
+    GOSSIP,
+    gossip_loop,
 )
+
+# =========================================================
+# KAD MELIA DHT
+# =========================================================
 
 from meshweaver.dht.node_id import (
     generate_node_id,
@@ -67,46 +54,21 @@ class MeshNode:
         self.port = port
         self.node_id = node_id
 
-        self.dht_node_id = generate_node_id(
-                self.node_id
-                )
-        
-        self.routing_table = RoutingTable(
-                self.dht_node_id
-            )
-        
-        print(
-    f"[{self.node_id}] "
-    f"DHT ID: "
-    f"{node_id_to_hex(self.dht_node_id)}"
-)
-
-
-        # =====================================================
+        # =================================================
         # UDP TRANSPORT
-        # =====================================================
+        # =================================================
 
         self.transport = None
 
-        # =====================================================
-        # PEERS
-        # =====================================================
+        # =================================================
+        # EXISTING PEER NETWORK
+        # =================================================
 
-        # Set of known peer addresses.
-        #
-        # Example:
-        #
-        # {
-        #     ("127.0.0.1", 9002),
-        #     ("127.0.0.1", 9003)
-        # }
-        #
+        # Known peers
         self.peers = set()
 
-        # =====================================================
-        # PEER LOAD INFORMATION
-        # =====================================================
-
+        # CPU/RAM information received from peers
+        #
         # Example:
         #
         # {
@@ -115,157 +77,85 @@ class MeshNode:
         #         "memory": 40.2
         #     }
         # }
-        #
+
         self.peer_loads = {}
 
-        # =====================================================
-        # BOOTSTRAP PEERS
-        # =====================================================
-
+        # Initial peers used for discovery
         self.bootstrap_peers = (
             bootstrap_peers or []
         )
 
-        # =====================================================
-        # TASK RESULTS
-        # =====================================================
+        # =================================================
+        # KAD MELIA DHT
+        # =================================================
 
-        # Completed task results.
-        #
-        # {
-        #     "task-id": {
-        #         "status": "COMPLETED",
-        #         "result": 123,
-        #         ...
-        #     }
-        # }
-        #
-        self.task_results = {}
+        # Generate a deterministic 160-bit
+        # DHT node ID from the MeshWeaver node ID.
 
-        # =====================================================
-        # PENDING TASKS
-        # =====================================================
+        self.dht_node_id = generate_node_id(
+            self.node_id
+        )
 
-        # Tasks currently assigned to remote peers.
-        #
-        # {
-        #     "task-id": {
-        #         "task": task_object,
-        #         "peer_id": "NODE_B",
-        #         "peer_addr": ("127.0.0.1", 9002)
-        #     }
-        # }
-        #
-        self.pending_tasks = {}
+        # Create Kademlia routing table.
 
-        # =====================================================
-        # HEARTBEAT / FAILURE DETECTION
-        # =====================================================
+        self.routing_table = RoutingTable(
+            self.dht_node_id
+        )
 
-        # Last heartbeat received from each peer.
-        #
-        # {
-        #     "NODE_B": timestamp
-        # }
-        #
-        self.peer_last_seen = {}
-
-        # Peer ID -> address.
-        #
-        # {
-        #     "NODE_B": ("127.0.0.1", 9002)
-        # }
-        #
-        self.peer_addresses = {}
-
-        # Peers that are currently considered offline.
-        self.dead_peers = set()
-
-    # =========================================================
+    # =====================================================
     # START NODE
-    # =========================================================
+    # =====================================================
 
     async def start(self):
 
         print("=" * 60)
         print("Starting MeshWeaver Node")
+        print(f"Node ID : {self.node_id}")
+        print(f"Address : {self.host}:{self.port}")
+
         print(
-            f"Node ID : {self.node_id}"
+            f"DHT ID  : "
+            f"{node_id_to_hex(self.dht_node_id)}"
         )
-        print(
-            f"Address : "
-            f"{self.host}:{self.port}"
-        )
+
         print("=" * 60)
 
-        # -----------------------------------------------------
         # Start UDP server
-        # -----------------------------------------------------
 
-        await start_udp_server(
-            self
-        )
+        await start_udp_server(self)
 
-        # Give the UDP server time to initialize.
+        # Give UDP server time to initialize
+
         await asyncio.sleep(1)
 
-        # -----------------------------------------------------
         # Initial peer discovery
-        # -----------------------------------------------------
 
         await self.discover_peers()
 
-        # -----------------------------------------------------
-        # Background services
-        # -----------------------------------------------------
+        # Periodic peer discovery
 
         asyncio.create_task(
             self.discovery_loop()
         )
 
+        # Periodic CPU/RAM gossip
+
         asyncio.create_task(
             gossip_loop(self)
         )
 
-        asyncio.create_task(
-            heartbeat_loop(self)
-        )
-
-        asyncio.create_task(
-            failure_detection_loop(self)
-        )
-
-        asyncio.create_task(
-            self.task_reassignment_loop()
-        )
-
-        # -----------------------------------------------------
         # Keep node alive
-        # -----------------------------------------------------
 
-        try:
+        await asyncio.Event().wait()
 
-            await asyncio.Event().wait()
-
-        except asyncio.CancelledError:
-
-            print(
-                f"\n[{self.node_id}] "
-                "Node stopped."
-            )
-
-            raise
-
-    # =========================================================
+    # =====================================================
     # PEER DISCOVERY
-    # =========================================================
+    # =====================================================
 
     async def discover_peers(self):
 
-        if self.transport is None:
-            return
-
         if not self.bootstrap_peers:
+
             return
 
         message = create_hello(
@@ -279,34 +169,24 @@ class MeshNode:
 
         for peer in self.bootstrap_peers:
 
-            # Do not send HELLO to ourselves.
-            if peer == (
-                self.host,
-                self.port,
+            # Don't send HELLO to ourselves
+
+            if (
+                peer[0] == self.host
+                and peer[1] == self.port
             ):
+
                 continue
 
-            try:
+            self.transport.sendto(
+                data,
+                peer,
+            )
 
-                self.transport.sendto(
-                    data,
-                    peer,
-                )
-
-                print(
-                    f"[{self.node_id}] "
-                    f"HELLO → {peer}"
-                )
-
-            except Exception as exc:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Failed to send HELLO "
-                    f"to {peer}: {exc}"
-                )
-
-    
+            print(
+                f"[{self.node_id}] "
+                f"HELLO → {peer}"
+            )
 
     async def discovery_loop(self):
 
@@ -314,11 +194,20 @@ class MeshNode:
 
             await asyncio.sleep(10)
 
-            await self.discover_peers()
+            try:
 
-    # =========================================================
+                await self.discover_peers()
+
+            except Exception as exc:
+
+                print(
+                    f"[{self.node_id}] "
+                    f"Discovery error: {exc}"
+                )
+
+    # =====================================================
     # MESSAGE HANDLING
-    # =========================================================
+    # =====================================================
 
     async def handle_message(
         self,
@@ -345,20 +234,12 @@ class MeshNode:
             "type"
         )
 
-        # -----------------------------------------------------
-        # HELLO
-        # -----------------------------------------------------
-
         if message_type == HELLO:
 
             await self.handle_hello(
                 message,
                 addr,
             )
-
-        # -----------------------------------------------------
-        # WELCOME
-        # -----------------------------------------------------
 
         elif message_type == WELCOME:
 
@@ -367,10 +248,6 @@ class MeshNode:
                 addr,
             )
 
-        # -----------------------------------------------------
-        # GOSSIP
-        # -----------------------------------------------------
-
         elif message_type == GOSSIP:
 
             await self.handle_gossip(
@@ -378,42 +255,12 @@ class MeshNode:
                 addr,
             )
 
-        # -----------------------------------------------------
-        # TASK
-        # -----------------------------------------------------
-
         elif message_type == TASK:
 
             await self.handle_task(
                 message,
                 addr,
             )
-
-        # -----------------------------------------------------
-        # RESULT
-        # -----------------------------------------------------
-
-        elif message_type == RESULT:
-
-            await self.handle_result(
-                message,
-                addr,
-            )
-
-        # -----------------------------------------------------
-        # HEARTBEAT
-        # -----------------------------------------------------
-
-        elif message_type == HEARTBEAT:
-
-            await self.handle_heartbeat(
-                message,
-                addr,
-            )
-
-        # -----------------------------------------------------
-        # UNKNOWN
-        # -----------------------------------------------------
 
         else:
 
@@ -423,9 +270,9 @@ class MeshNode:
                 f"{message_type}"
             )
 
-    # =========================================================
+    # =====================================================
     # HELLO
-    # =========================================================
+    # =====================================================
 
     async def handle_hello(
         self,
@@ -437,40 +284,31 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore ourselves.
+        # Ignore our own message
+
         if peer_id == self.node_id:
+
             return
+
+        # Check whether this is a new peer
 
         is_new_peer = (
             addr not in self.peers
         )
 
-        # Register peer.
+        # Add to existing peer table
+
         self.peers.add(
             addr
         )
 
-        self.peer_addresses[
-            peer_id
-        ] = addr
+        # Add to Kademlia routing table
 
-        self.peer_last_seen[
-            peer_id
-        ] = time.time()
-
-        # If peer was previously offline,
-        # mark it online again.
-        if peer_id in self.dead_peers:
-
-            self.dead_peers.remove(
-                peer_id
-            )
-
-            print(
-                f"\n[{self.node_id}] "
-                f"PEER BACK ONLINE: "
-                f"{peer_id}"
-            )
+        self.add_peer_to_routing_table(
+            peer_id,
+            addr[0],
+            addr[1],
+        )
 
         if is_new_peer:
 
@@ -482,35 +320,23 @@ class MeshNode:
 
             self.print_peers()
 
-        # -----------------------------------------------------
-        # Send WELCOME
-        # -----------------------------------------------------
+            self.print_dht_table()
+
+        # Send WELCOME response
 
         response = create_welcome(
             self.node_id,
             self.port,
         )
 
-        try:
+        self.transport.sendto(
+            encode_message(response),
+            addr,
+        )
 
-            self.transport.sendto(
-                encode_message(
-                    response
-                ),
-                addr,
-            )
-
-        except Exception as exc:
-
-            print(
-                f"[{self.node_id}] "
-                f"Failed to send WELCOME: "
-                f"{exc}"
-            )
-
-    # =========================================================
+    # =====================================================
     # WELCOME
-    # =========================================================
+    # =====================================================
 
     async def handle_welcome(
         self,
@@ -522,38 +348,31 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore ourselves.
+        # Ignore ourselves
+
         if peer_id == self.node_id:
+
             return
+
+        # Check whether this is a new peer
 
         is_new_peer = (
             addr not in self.peers
         )
 
+        # Add to existing peer table
+
         self.peers.add(
             addr
         )
 
-        self.peer_addresses[
-            peer_id
-        ] = addr
+        # Add to Kademlia routing table
 
-        self.peer_last_seen[
-            peer_id
-        ] = time.time()
-
-        # Peer has responded, so it is alive.
-        if peer_id in self.dead_peers:
-
-            self.dead_peers.remove(
-                peer_id
-            )
-
-            print(
-                f"\n[{self.node_id}] "
-                f"PEER BACK ONLINE: "
-                f"{peer_id}"
-            )
+        self.add_peer_to_routing_table(
+            peer_id,
+            addr[0],
+            addr[1],
+        )
 
         if is_new_peer:
 
@@ -565,45 +384,11 @@ class MeshNode:
 
             self.print_peers()
 
-    # =========================================================
-    # HEARTBEAT
-    # =========================================================
+            self.print_dht_table()
 
-    async def handle_heartbeat(
-        self,
-        message,
-        addr,
-    ):
-
-        peer_id = message.get(
-            "node_id"
-        )
-
-        # Ignore our own heartbeat.
-        if peer_id == self.node_id:
-            return
-
-        # Register the peer if necessary.
-        self.peers.add(
-            addr
-        )
-
-        # Update heartbeat state.
-        mark_peer_alive(
-            self,
-            peer_id,
-            addr,
-        )
-
-        print(
-            f"[{self.node_id}] "
-            f"HEARTBEAT ← "
-            f"{peer_id}"
-        )
-
-    # =========================================================
+    # =====================================================
     # GOSSIP
-    # =========================================================
+    # =====================================================
 
     async def handle_gossip(
         self,
@@ -619,11 +404,14 @@ class MeshNode:
             "load"
         )
 
-        # Ignore ourselves.
+        # Ignore our own gossip
+
         if peer_id == self.node_id:
+
             return
 
-        # Validate load.
+        # Validate load
+
         if not isinstance(
             load,
             dict,
@@ -650,28 +438,8 @@ class MeshNode:
 
             return
 
-        # Register peer.
-        self.peers.add(
-            addr
-        )
+        # Store peer load
 
-        self.peer_addresses[
-            peer_id
-        ] = addr
-
-        # Receiving gossip also proves
-        # that the peer is alive.
-        self.peer_last_seen[
-            peer_id
-        ] = time.time()
-
-        if peer_id in self.dead_peers:
-
-            self.dead_peers.remove(
-                peer_id
-            )
-
-        # Store load.
         self.peer_loads[
             peer_id
         ] = load
@@ -694,41 +462,66 @@ class MeshNode:
 
         self.print_peer_loads()
 
-    # =========================================================
+    # =====================================================
+    # TASK HANDLING
+    # =====================================================
+
+    async def handle_task(
+        self,
+        message,
+        addr,
+    ):
+
+        print(
+            f"\n[{self.node_id}] "
+            f"TASK received from {addr}"
+        )
+
+        try:
+
+            task = extract_task(
+                message
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"Task extracted successfully"
+            )
+
+            return task
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Task extraction failed: "
+                f"{exc}"
+            )
+
+            return None
+
+    # =====================================================
     # LOAD BALANCER
-    # =========================================================
+    # =====================================================
 
     def get_best_peer(self):
+
+        # No peer information available
 
         if not self.peer_loads:
 
             print(
                 f"[{self.node_id}] "
-                "No peer load information "
-                "available."
+                f"No peer load information "
+                f"available."
             )
 
             return None
 
-        # Only online peers can receive tasks.
-        available_loads = {
-            peer_id: load
-            for peer_id, load
-            in self.peer_loads.items()
-            if peer_id not in self.dead_peers
-        }
-
-        if not available_loads:
-
-            print(
-                f"[{self.node_id}] "
-                "No online peers available."
-            )
-
-            return None
+        # Select peer with lowest load
 
         best_peer = select_best_peer(
-            available_loads
+            self.peer_loads
         )
 
         print(
@@ -739,15 +532,20 @@ class MeshNode:
 
         return best_peer
 
+    # =====================================================
+    # PEER LOAD TABLE
+    # =====================================================
+
     def print_peer_loads(self):
 
         print()
+
         print(
             f"[{self.node_id}] "
             f"PEER LOAD TABLE"
         )
 
-        print("-" * 75)
+        print("-" * 60)
 
         if not self.peer_loads:
 
@@ -755,13 +553,14 @@ class MeshNode:
                 "No peer load information."
             )
 
-            print("-" * 75)
+            print("-" * 60)
 
             return
 
-        for peer_id, load in (
-            self.peer_loads.items()
-        ):
+        for (
+            peer_id,
+            load,
+        ) in self.peer_loads.items():
 
             cpu = load.get(
                 "cpu",
@@ -777,687 +576,196 @@ class MeshNode:
                 cpu + memory
             ) / 2
 
-            status = (
-                "OFFLINE"
-                if peer_id in self.dead_peers
-                else "ONLINE"
-            )
-
             print(
-                f"{peer_id:12} "
+                f"{peer_id:10} "
                 f"CPU: {cpu:5.1f}% | "
                 f"RAM: {memory:5.1f}% | "
-                f"SCORE: {score:5.1f} | "
-                f"{status}"
+                f"SCORE: {score:5.1f}"
             )
 
-        print("-" * 75)
+        print("-" * 60)
 
-    # =========================================================
-    # SEND TASK
-    # =========================================================
+    # =====================================================
+    # KAD MELIA DHT
+    # =====================================================
 
-    async def send_task(
+    def add_peer_to_routing_table(
         self,
-        task,
-        peer_addr,
+        peer_id,
+        host,
+        port,
     ):
 
-        if self.transport is None:
-
-            raise RuntimeError(
-                "Node UDP transport "
-                "is not running."
-            )
-
-        # -----------------------------------------------------
-        # Find peer ID
-        # -----------------------------------------------------
-
-        peer_id = None
-
-        for known_peer_id, known_addr in (
-            self.peer_addresses.items()
-        ):
-
-            if known_addr == peer_addr:
-
-                peer_id = known_peer_id
-
-                break
-
-        # If address is unknown, still allow
-        # sending but warn.
-        if peer_id is None:
-
-            print(
-                f"[{self.node_id}] "
-                f"Warning: peer ID not found "
-                f"for {peer_addr}"
-            )
-
-        # -----------------------------------------------------
-        # Do not send to known offline peer
-        # -----------------------------------------------------
-
-        if (
-            peer_id is not None
-            and peer_id in self.dead_peers
-        ):
-
-            print(
-                f"[{self.node_id}] "
-                f"Cannot send task to "
-                f"offline peer "
-                f"{peer_id}"
-            )
+        if not peer_id:
 
             return False
 
-        # -----------------------------------------------------
-        # Assign task
-        # -----------------------------------------------------
+        # Don't add ourselves
 
-        task.assign(
-            f"{peer_addr[0]}:"
-            f"{peer_addr[1]}"
-        )
+        if peer_id == self.node_id:
 
-        # -----------------------------------------------------
-        # Create network message
-        # -----------------------------------------------------
-
-        message = create_task_message(
-            self.node_id,
-            task,
-        )
-
-        data = encode_message(
-            message
-        )
-
-        # -----------------------------------------------------
-        # Send
-        # -----------------------------------------------------
+            return False
 
         try:
 
-            self.transport.sendto(
-                data,
-                peer_addr,
+            # Convert peer's MeshWeaver ID
+            # into a deterministic 160-bit ID.
+
+            peer_dht_id = (
+                generate_node_id(
+                    peer_id
+                )
             )
+
+            peer = PeerInfo(
+                node_id=peer_dht_id,
+                host=host,
+                port=port,
+            )
+
+            added = (
+                self.routing_table.add_peer(
+                    peer
+                )
+            )
+
+            if added:
+
+                bucket_index = (
+                    self.routing_table.bucket_index(
+                        peer_dht_id
+                    )
+                )
+
+                print(
+                    f"[{self.node_id}] "
+                    f"DHT peer added: "
+                    f"{peer_id} "
+                    f"(bucket "
+                    f"{bucket_index})"
+                )
+
+            return added
 
         except Exception as exc:
 
             print(
                 f"[{self.node_id}] "
-                f"Failed to send task: "
+                f"DHT peer error: "
                 f"{exc}"
             )
 
             return False
 
-        # -----------------------------------------------------
-        # Track task
-        # -----------------------------------------------------
+    # =====================================================
+    # DHT ROUTING TABLE
+    # =====================================================
 
-        self.pending_tasks[
-            task.task_id
-        ] = {
-            "task": task,
-            "peer_id": peer_id,
-            "peer_addr": peer_addr,
-        }
+    def print_dht_table(self):
 
         print()
-        print("=" * 60)
-        print(
-            f"[{self.node_id}] "
-            f"TASK SENT"
-        )
-        print("=" * 60)
-
-        print(
-            f"Task ID  : "
-            f"{task.task_id}"
-        )
-
-        print(
-            f"Function : "
-            f"{task.function_name}"
-        )
-
-        print(
-            f"Target   : "
-            f"{peer_id}"
-        )
-
-        print(
-            f"Address  : "
-            f"{peer_addr}"
-        )
-
-        print("=" * 60)
-
-        return True
-
-    # =========================================================
-    # RECEIVE TASK
-    # =========================================================
-
-    async def handle_task(
-        self,
-        message,
-        addr,
-    ):
-
-        try:
-
-            task = extract_task(
-                message
-            )
-
-        except Exception as exc:
-
-            print(
-                f"[{self.node_id}] "
-                f"Failed to deserialize "
-                f"task: {exc}"
-            )
-
-            return
-
-        sender_id = message.get(
-            "sender_id"
-        )
-
-        print()
-        print("=" * 60)
 
         print(
             f"[{self.node_id}] "
-            f"TASK RECEIVED"
+            f"KAD MELIA ROUTING TABLE"
         )
 
-        print("=" * 60)
+        print("-" * 70)
 
-        print(
-            f"Task ID   : "
-            f"{task.task_id}"
-        )
+        total_peers = 0
 
-        print(
-            f"Function  : "
-            f"{task.function_name}"
-        )
-
-        print(
-            f"Arguments : "
-            f"{task.args}"
-        )
-
-        print(
-            f"Sender    : "
-            f"{sender_id}"
-        )
-
-        print("=" * 60)
-
-        # -----------------------------------------------------
-        # Execute
-        # -----------------------------------------------------
-
-        print(
-            f"[{self.node_id}] "
-            f"Executing task..."
-        )
-
-        try:
-
-            task = execute_task(
-                task
-            )
-
-        except Exception as exc:
-
-            print(
-                f"[{self.node_id}] "
-                f"Task execution error: "
-                f"{exc}"
-            )
-
-            # Try to report execution failure.
-            try:
-
-                result_message = create_result(
-                    sender_id=self.node_id,
-                    task_id=task.task_id,
-                    status="FAILED",
-                    result=None,
-                    error=str(exc),
-                )
-
-                self.transport.sendto(
-                    encode_message(
-                        result_message
-                    ),
-                    addr,
-                )
-
-            except Exception as result_exc:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Failed to send error "
-                    f"result: "
-                    f"{result_exc}"
-                )
-
-            return
-
-        # -----------------------------------------------------
-        # Display result
-        # -----------------------------------------------------
-
-        print()
-        print(
-            f"[{self.node_id}] "
-            f"TASK FINISHED"
-        )
-
-        print(
-            f"Status : "
-            f"{task.status.value}"
-        )
-
-        if (
-            task.status.value
-            == "COMPLETED"
+        for (
+            index,
+            bucket,
+        ) in enumerate(
+            self.routing_table.buckets
         ):
 
-            print(
-                f"Result : "
-                f"{task.result}"
-            )
+            if not bucket:
 
-        else:
+                continue
 
             print(
-                f"Error  : "
-                f"{task.error}"
+                f"Bucket {index}:"
             )
 
-        print("=" * 60)
+            for peer in bucket:
 
-        # -----------------------------------------------------
-        # Send result back
-        # -----------------------------------------------------
+                print(
+                    f"   └── "
+                    f"{peer.host}:"
+                    f"{peer.port} "
+                    f"ID="
+                    f"{node_id_to_hex(peer.node_id)}"
+                )
 
-        result_message = create_result(
-            sender_id=self.node_id,
-            task_id=task.task_id,
-            status=task.status.value,
-            result=task.result,
-            error=task.error,
+                total_peers += 1
+
+        if total_peers == 0:
+
+            print(
+                "   No DHT peers."
+            )
+
+        print("-" * 70)
+
+        print(
+            f"Total DHT peers: "
+            f"{total_peers}"
         )
 
-        try:
+    # =====================================================
+    # FIND PEERS IN DHT BUCKET
+    # =====================================================
 
-            self.transport.sendto(
-                encode_message(
-                    result_message
-                ),
-                addr,
-            )
-
-            print(
-                f"[{self.node_id}] "
-                f"RESULT SENT → "
-                f"{addr}"
-            )
-
-        except Exception as exc:
-
-            print(
-                f"[{self.node_id}] "
-                f"Failed to send result: "
-                f"{exc}"
-            )
-
-    # =========================================================
-    # RECEIVE RESULT
-    # =========================================================
-
-    async def handle_result(
+    def get_dht_bucket_peers(
         self,
-        message,
-        addr,
+        peer_node_id,
     ):
 
-        task_id = message.get(
-            "task_id"
-        )
-
-        status = message.get(
-            "status"
-        )
-
-        result = message.get(
-            "result"
-        )
-
-        error = message.get(
-            "error"
-        )
-
-        sender_id = message.get(
-            "sender_id"
-        )
-
-        # -----------------------------------------------------
-        # Store result
-        # -----------------------------------------------------
-
-        self.task_results[
-            task_id
-        ] = {
-            "status": status,
-            "result": result,
-            "error": error,
-            "sender_id": sender_id,
-            "address": addr,
-        }
-
-        # -----------------------------------------------------
-        # Completed tasks are no longer pending.
-        # -----------------------------------------------------
-
-        if status == "COMPLETED":
-
-            self.pending_tasks.pop(
-                task_id,
-                None,
+        return (
+            self.routing_table.find_bucket_peers(
+                peer_node_id
             )
+        )
 
-        # Failed tasks can also be removed here.
-        #
-        # Day 7 reassignment is primarily based
-        # on peer failure rather than task execution
-        # failure.
-        #
-        elif status == "FAILED":
+    # =====================================================
+    # ALL DHT PEERS
+    # =====================================================
 
-            self.pending_tasks.pop(
-                task_id,
-                None,
+    def get_all_dht_peers(self):
+
+        return (
+            self.routing_table.get_all_peers()
+        )
+
+    # =====================================================
+    # REMOVE PEER FROM DHT
+    # =====================================================
+
+    def remove_dht_peer(
+        self,
+        peer_node_id,
+    ):
+
+        removed = (
+            self.routing_table.remove_peer(
+                peer_node_id
             )
-
-        print()
-        print("=" * 60)
-
-        print(
-            f"[{self.node_id}] "
-            f"TASK RESULT RECEIVED"
         )
 
-        print("=" * 60)
-
-        print(
-            f"Task ID : "
-            f"{task_id}"
-        )
-
-        print(
-            f"From    : "
-            f"{sender_id}"
-        )
-
-        print(
-            f"Status  : "
-            f"{status}"
-        )
-
-        if status == "COMPLETED":
-
-            print(
-                f"Result  : "
-                f"{result}"
-            )
-
-        else:
-
-            print(
-                f"Error   : "
-                f"{error}"
-            )
-
-        print("=" * 60)
-
-    # =========================================================
-    # FAILED TASK REASSIGNMENT
-    # =========================================================
-
-    async def reassign_failed_tasks(self):
-
-        if not self.pending_tasks:
-
-            return
-
-        # Work on a snapshot so the dictionary
-        # can safely change during reassignment.
-        pending_snapshot = list(
-            self.pending_tasks.items()
-        )
-
-        for task_id, task_info in (
-            pending_snapshot
-        ):
-
-            peer_id = task_info.get(
-                "peer_id"
-            )
-
-            # -------------------------------------------------
-            # We can only reassign if the assigned
-            # peer is known to be dead.
-            # -------------------------------------------------
-
-            if peer_id is None:
-
-                continue
-
-            if peer_id not in self.dead_peers:
-
-                continue
-
-            print()
-            print("=" * 60)
+        if removed:
 
             print(
                 f"[{self.node_id}] "
-                f"FAILED PEER DETECTED"
+                f"DHT peer removed."
             )
 
-            print(
-                f"Task   : {task_id}"
-            )
+        return removed
 
-            print(
-                f"Failed : {peer_id}"
-            )
-
-            print("=" * 60)
-
-            # -------------------------------------------------
-            # Find another online peer.
-            # -------------------------------------------------
-
-            new_peer_id = self.get_best_peer()
-
-            if new_peer_id is None:
-
-                print(
-                    f"[{self.node_id}] "
-                    "No online peer available "
-                    "for task reassignment."
-                )
-
-                continue
-
-            # Safety check.
-            if (
-                new_peer_id
-                == peer_id
-            ):
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Selected peer "
-                    f"{new_peer_id} "
-                    f"is the failed peer."
-                )
-
-                continue
-
-            if (
-                new_peer_id
-                in self.dead_peers
-            ):
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Selected peer "
-                    f"{new_peer_id} "
-                    f"is offline."
-                )
-
-                continue
-
-            # -------------------------------------------------
-            # Find address.
-            # -------------------------------------------------
-
-            new_peer_addr = (
-                self.peer_addresses.get(
-                    new_peer_id
-                )
-            )
-
-            if new_peer_addr is None:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"No address known for "
-                    f"{new_peer_id}."
-                )
-
-                continue
-
-            # -------------------------------------------------
-            # Get original task.
-            # -------------------------------------------------
-
-            task = task_info.get(
-                "task"
-            )
-
-            if task is None:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Task object missing for "
-                    f"{task_id}."
-                )
-
-                # Remove broken pending entry.
-                self.pending_tasks.pop(
-                    task_id,
-                    None,
-                )
-
-                continue
-
-            print(
-                f"[{self.node_id}] "
-                f"REASSIGNING TASK"
-            )
-
-            print(
-                f"   Task : "
-                f"{task_id}"
-            )
-
-            print(
-                f"   From : "
-                f"{peer_id}"
-            )
-
-            print(
-                f"   To   : "
-                f"{new_peer_id}"
-            )
-
-            # -------------------------------------------------
-            # Remove old assignment before sending.
-            # send_task() creates the new assignment.
-            # -------------------------------------------------
-
-            self.pending_tasks.pop(
-                task_id,
-                None,
-            )
-
-            success = await self.send_task(
-                task,
-                new_peer_addr,
-            )
-
-            if success:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"TASK REASSIGNED "
-                    f"SUCCESSFULLY"
-                )
-
-            else:
-
-                # Restore the pending task if
-                # reassignment failed.
-                self.pending_tasks[
-                    task_id
-                ] = task_info
-
-                print(
-                    f"[{self.node_id}] "
-                    f"TASK REASSIGNMENT FAILED"
-                )
-
-    # =========================================================
-    # TASK REASSIGNMENT LOOP
-    # =========================================================
-
-    async def task_reassignment_loop(self):
-
-        while True:
-
-            await asyncio.sleep(3)
-
-            try:
-
-                await self.reassign_failed_tasks()
-
-            except Exception as exc:
-
-                print(
-                    f"[{self.node_id}] "
-                    f"Reassignment error: "
-                    f"{exc}"
-                )
-
-    # =========================================================
-    # PEER TABLE
-    # =========================================================
+    # =====================================================
+    # EXISTING PEER TABLE
+    # =====================================================
 
     def print_peers(self):
 
@@ -1467,17 +775,10 @@ class MeshNode:
             f"{len(self.peers)}"
         )
 
-        if not self.peers:
-
-            print(
-                "   └── No peers"
-            )
-
-            return
-
-        for host, port in sorted(
-            self.peers
-        ):
+        for (
+            host,
+            port,
+        ) in self.peers:
 
             print(
                 f"   └── "
