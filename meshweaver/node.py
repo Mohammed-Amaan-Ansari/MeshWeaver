@@ -42,6 +42,16 @@ from meshweaver.task.executor import (
     execute_task,
 )
 
+from meshweaver.dht.node_id import (
+    generate_node_id,
+    node_id_to_hex,
+)
+
+from meshweaver.dht.routing_table import (
+    PeerInfo,
+    RoutingTable,
+)
+
 
 class MeshNode:
 
@@ -56,6 +66,21 @@ class MeshNode:
         self.host = host
         self.port = port
         self.node_id = node_id
+
+        self.dht_node_id = generate_node_id(
+                self.node_id
+                )
+        
+        self.routing_table = RoutingTable(
+                self.dht_node_id
+            )
+        
+        print(
+    f"[{self.node_id}] "
+    f"DHT ID: "
+    f"{node_id_to_hex(self.dht_node_id)}"
+)
+
 
         # =====================================================
         # UDP TRANSPORT
@@ -280,6 +305,8 @@ class MeshNode:
                     f"Failed to send HELLO "
                     f"to {peer}: {exc}"
                 )
+
+    
 
     async def discovery_loop(self):
 
