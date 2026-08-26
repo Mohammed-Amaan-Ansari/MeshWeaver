@@ -136,3 +136,25 @@ def test_routing_table_does_not_add_self():
     assert added is False
 
     assert len(table) == 0
+
+def test_routing_table_bucket_selection():
+
+    local_id = generate_node_id(
+        "NODE_A"
+    )
+
+    peer_id = generate_node_id(
+        "NODE_B"
+    )
+
+    table = RoutingTable(
+        local_id
+    )
+
+    bucket = table.bucket_index(
+        peer_id
+    )
+
+    assert bucket is not None
+
+    assert 0 <= bucket < 160
