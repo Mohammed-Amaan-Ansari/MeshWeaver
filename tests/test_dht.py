@@ -158,3 +158,59 @@ def test_routing_table_bucket_selection():
     assert bucket is not None
 
     assert 0 <= bucket < 160
+
+
+def test_find_closest_peers():
+
+    local_id = generate_node_id(
+        "NODE_A"
+    )
+
+    table = RoutingTable(
+        local_id
+    )
+
+    peer_a = PeerInfo(
+        node_id=generate_node_id(
+            "NODE_B"
+        ),
+        host="127.0.0.1",
+        port=9002,
+    )
+
+    peer_b = PeerInfo(
+        node_id=generate_node_id(
+            "NODE_C"
+        ),
+        host="127.0.0.1",
+        port=9003,
+    )
+
+    peer_c = PeerInfo(
+        node_id=generate_node_id(
+            "NODE_D"
+        ),
+        host="127.0.0.1",
+        port=9004,
+    )
+
+    table.add_peer(peer_a)
+    table.add_peer(peer_b)
+    table.add_peer(peer_c)
+
+    target = generate_node_id(
+        "NODE_X"
+    )
+
+    closest = table.find_closest_peers(
+        target,
+        count=2,
+    )
+
+    assert len(closest) == 2
+
+    assert closest[0] in [
+        peer_a,
+        peer_b,
+        peer_c,
+    ]
