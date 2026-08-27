@@ -784,3 +784,86 @@ class MeshNode:
                 f"   └── "
                 f"{host}:{port}"
             )
+
+        # =====================================================
+    # DHT PEER LOOKUP
+    # =====================================================
+
+    def find_closest_peers(
+        self,
+        target_node_id,
+        count=3,
+    ):
+        """
+        Find the closest peers to a target
+        DHT node ID.
+        """
+
+        return self.routing_table.find_closest_peers(
+            target_node_id,
+            count,
+        )
+
+    # =====================================================
+    # DHT LOOKUP BY NODE NAME
+    # =====================================================
+
+    def find_closest_peers_by_id(
+        self,
+        target_node_name,
+        count=3,
+    ):
+        """
+        Convert a MeshWeaver node name into a
+        deterministic DHT ID and find the
+        closest peers.
+        """
+
+        target_dht_id = generate_node_id(
+            target_node_name
+        )
+
+        peers = self.find_closest_peers(
+            target_dht_id,
+            count,
+        )
+
+        print()
+        print(
+            f"[{self.node_id}] "
+            f"DHT LOOKUP: "
+            f"{target_node_name}"
+        )
+
+        print("-" * 60)
+
+        if not peers:
+
+            print(
+                "No peers available."
+            )
+
+            print("-" * 60)
+
+            return []
+
+        for index, peer in enumerate(
+            peers,
+            start=1,
+        ):
+
+            distance = (
+                self.routing_table.distance_to(
+                    peer.node_id
+                )
+            )
+
+            print(
+                f"{index}. "
+                f"{peer.host}:{peer.port} "
+                f"| distance={distance}"
+            )
+
+        print("-" * 60)
+
+        return peers
