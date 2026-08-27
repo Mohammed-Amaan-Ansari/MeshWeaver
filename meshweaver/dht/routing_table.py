@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from meshweaver.dht.node_id import (
     ID_BITS,
-    node_id_to_int,
     xor_distance,
 )
 
@@ -26,40 +25,39 @@ class RoutingTable:
             local_node_id,
             bytes,
         ):
-
             raise TypeError(
                 "local_node_id must be bytes"
             )
 
-        self.local_node_id = (
-            local_node_id
-        )
+        self.local_node_id = local_node_id
 
-        # Kademlia uses one bucket
+        # Kademlia has one bucket
         # for each bit of the node ID.
         self.buckets = [
             []
             for _ in range(ID_BITS)
         ]
 
+    # =====================================================
+    # BUCKET INDEX
+    # =====================================================
+
     def bucket_index(self, peer_node_id):
-        """
-        Determine which Kademlia bucket
-        should contain the peer.
-        """
 
         distance = xor_distance(
             self.local_node_id,
             peer_node_id,
         )
 
+        # Same node
         if distance == 0:
-
             return None
 
-        index = distance.bit_length() - 1
+        return distance.bit_length() - 1
 
-        return index
+    # =====================================================
+    # ADD PEER
+    # =====================================================
 
     def add_peer(self, peer):
 
@@ -67,26 +65,27 @@ class RoutingTable:
             peer.node_id
         )
 
-        # Same node ID as local node.
         if index is None:
-
             return False
 
         bucket = self.buckets[index]
 
-        # Avoid duplicates.
+        # Prevent duplicate peers
         for existing_peer in bucket:
 
             if (
                 existing_peer.node_id
                 == peer.node_id
             ):
-
                 return False
 
         bucket.append(peer)
 
         return True
+
+    # =====================================================
+    # REMOVE PEER
+    # =====================================================
 
     def remove_peer(self, node_id):
 
@@ -95,7 +94,6 @@ class RoutingTable:
         )
 
         if index is None:
-
             return False
 
         bucket = self.buckets[index]
@@ -110,6 +108,10 @@ class RoutingTable:
 
         return False
 
+    # =====================================================
+    # FIND BUCKET PEERS
+    # =====================================================
+
     def find_bucket_peers(
         self,
         peer_node_id,
@@ -120,12 +122,15 @@ class RoutingTable:
         )
 
         if index is None:
-
             return []
 
         return list(
             self.buckets[index]
         )
+
+    # =====================================================
+    # GET ALL PEERS
+    # =====================================================
 
     def get_all_peers(self):
 
@@ -136,6 +141,59 @@ class RoutingTable:
             peers.extend(bucket)
 
         return peers
+
+    # =====================================================
+    # XOR DISTANCE
+    # =====================================================
+
+    def distance_to(self, node_id):
+
+        return xor_distance(
+            self.local_node_id,
+            node_id,
+        )
+
+    # =====================================================
+    # FIND CLOSEST PEERS
+    # =====================================================
+
+    def find_closest_peers(
+        self,
+        target_node_id,
+        count=3,
+    ):
+        """
+        Return the closest peers to a target
+        node ID using Kademlia XOR distance.
+        """
+
+        if not isinstance(
+            target_node_id,
+            bytes,
+        ):
+            raise TypeError(
+                "target_node_id must be bytes"
+            )
+
+        if count <= 0:
+            return []
+
+        peers = self.get_all_peers()
+
+        # Sort peers according to
+        # XOR distance from target.
+        peers.sort(
+            key=lambda peer: xor_distance(
+                peer.node_id,
+                target_node_id,
+            )
+        )
+
+        return peers[:count]
+
+    # =====================================================
+    # TABLE LENGTH
+    # =====================================================
 
     def __len__(self):
 
