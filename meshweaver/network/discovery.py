@@ -13,6 +13,9 @@ GOSSIP = "GOSSIP"
 
 HEARTBEAT = "HEARTBEAT"
 
+FIND_NODE = "FIND_NODE"
+FIND_NODE_RESPONSE = "FIND_NODE_RESPONSE"
+
 
 def create_hello(
     node_id,
