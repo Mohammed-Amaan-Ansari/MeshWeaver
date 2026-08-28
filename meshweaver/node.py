@@ -272,7 +272,7 @@ class MeshNode:
             )
 
         elif message_type == FIND_NODE_RESPONSE:
-            await self.handle_find_node_respons(
+            await self.handle_find_node_response(
                 message,
                 addr,
             )
