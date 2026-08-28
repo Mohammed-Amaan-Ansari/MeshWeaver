@@ -286,6 +286,186 @@ class MeshNode:
                 f"{message_type}"
             )
 
+        # =====================================================
+    # KAD MELIA FIND_NODE
+    # =====================================================
+
+    async def handle_find_node(
+        self,
+        message,
+        addr,
+    ):
+        """
+        Handle an incoming Kademlia
+        FIND_NODE request.
+        """
+
+        requester_id = message.get(
+            "node_id"
+        )
+
+        target_hex = message.get(
+            "target_id"
+        )
+
+        if not target_hex:
+
+            print(
+                f"[{self.node_id}] "
+                "FIND_NODE missing target."
+            )
+
+            return
+
+        try:
+
+            target_id = bytes.fromhex(
+                target_hex
+            )
+
+        except ValueError:
+
+            print(
+                f"[{self.node_id}] "
+                "Invalid FIND_NODE target."
+            )
+
+            return
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE request from "
+            f"{requester_id}"
+        )
+
+        # Find closest known peers.
+
+        closest_peers = (
+            self.routing_table.find_closest_peers(
+                target_id,
+                count=3,
+            )
+        )
+
+        response_peers = []
+
+        for peer in closest_peers:
+
+            response_peers.append(
+                {
+                    "node_id": peer.node_id.hex(),
+                    "host": peer.host,
+                    "port": peer.port,
+                }
+            )
+
+        response = (
+            create_find_node_response(
+                self.node_id,
+                response_peers,
+            )
+        )
+
+        self.transport.sendto(
+            encode_message(response),
+            addr,
+        )
+
+        print(
+            f"[{self.node_id}] "
+            f"FIND_NODE response → "
+            f"{addr}"
+        )
+
+        print(
+            f"   Returned peers: "
+            f"{len(response_peers)}"
+        )
+
+
+    async def handle_find_node_response(
+        self,
+        message,
+        addr,
+    ):
+        """
+        Process the response received
+        from a remote peer.
+        """
+
+        peer_id = message.get(
+            "node_id"
+        )
+
+        peers = message.get(
+            "peers",
+            [],
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE response from "
+            f"{peer_id}"
+        )
+
+        if not peers:
+
+            print(
+                "   No peers returned."
+            )
+
+            return
+
+        for peer in peers:
+
+            print(
+                f"   └── "
+                f"{peer.get('host')}:"
+                f"{peer.get('port')} "
+                f"ID="
+                f"{peer.get('node_id')}"
+            )
+
+    async def find_node(
+        self,
+        peer_addr,
+        target_node_name,
+    ):
+        """
+        Ask a remote peer to find the
+        closest nodes to a target.
+        """
+
+        target_id = generate_node_id(
+            target_node_name
+        )
+
+        message = create_find_node(
+            self.node_id,
+            target_id,
+        )
+
+        self.transport.sendto(
+            encode_message(message),
+            peer_addr,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE → {peer_addr}"
+        )
+
+        print(
+            f"   Target: "
+            f"{target_node_name}"
+        )
+
+        print(
+            f"   Target DHT ID: "
+            f"{node_id_to_hex(target_id)}"
+        )
+    
+
     # =====================================================
     # HELLO
     # =====================================================
