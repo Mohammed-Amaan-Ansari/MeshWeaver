@@ -16,7 +16,35 @@ HEARTBEAT = "HEARTBEAT"
 FIND_NODE = "FIND_NODE"
 FIND_NODE_RESPONSE = "FIND_NODE_RESPONSE"
 
+def create_find_node(
+    node_id,
+    target_id,
+):
+    """
+    Create a Kademlia FIND_NODE request.
+    """
 
+    return {
+        "type": FIND_NODE,
+        "node_id": node_id,
+        "target_id": target_id.hex(),
+    }
+
+
+def create_find_node_response(
+    node_id,
+    peers,
+):
+    """
+    Create a response containing
+    the closest known peers.
+    """
+
+    return {
+        "type": FIND_NODE_RESPONSE,
+        "node_id": node_id,
+        "peers": peers,
+    }
 def create_hello(
     node_id,
     port,
