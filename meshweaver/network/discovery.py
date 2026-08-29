@@ -16,6 +16,12 @@ HEARTBEAT = "HEARTBEAT"
 FIND_NODE = "FIND_NODE"
 FIND_NODE_RESPONSE = "FIND_NODE_RESPONSE"
 
+STORE = "STORE"
+FIND_VALUE = "FIND_VALUE"
+
+STORE_RESPONSE = "STORE_RESPONSE"
+FIND_VALUE_RESPONSE = "FIND_VALUE_RESPONSE"
+
 def create_find_node(
     node_id,
     target_id,
@@ -113,3 +119,70 @@ def decode_message(
     return json.loads(
         data.decode("utf-8")
     )
+
+def create_store(
+    node_id,
+    key,
+    value,
+):
+    """
+    Create a DHT STORE request.
+    """
+
+    return {
+        "type": STORE,
+        "node_id": node_id,
+        "key": key,
+        "value": value,
+    }
+
+
+def create_find_value(
+    node_id,
+    key,
+):
+    """
+    Create a DHT FIND_VALUE request.
+    """
+
+    return {
+        "type": FIND_VALUE,
+        "node_id": node_id,
+        "key": key,
+    }
+
+
+def create_store_response(
+    node_id,
+    key,
+    success,
+):
+    """
+    Create STORE response.
+    """
+
+    return {
+        "type": STORE_RESPONSE,
+        "node_id": node_id,
+        "key": key,
+        "success": success,
+    }
+
+
+def create_find_value_response(
+    node_id,
+    key,
+    value,
+    found,
+):
+    """
+    Create FIND_VALUE response.
+    """
+
+    return {
+        "type": FIND_VALUE_RESPONSE,
+        "node_id": node_id,
+        "key": key,
+        "value": value,
+        "found": found,
+    }

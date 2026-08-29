@@ -293,6 +293,34 @@ class MeshNode:
                 message,
                 addr,
             )
+
+        elif message_type == STORE:
+
+            await self.handle_store(
+        message,
+        addr,
+    )
+
+        elif message_type == FIND_VALUE:
+
+            await self.handle_find_value(
+        message,
+        addr,
+    )
+
+        elif message_type == STORE_RESPONSE:
+
+            await self.handle_store_response(
+        message,
+        addr,
+    )
+
+        elif message_type == FIND_VALUE_RESPONSE:
+
+            await self.handle_find_value_response(
+        message,
+        addr,
+    )
         
 
         else:
