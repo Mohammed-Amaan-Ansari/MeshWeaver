@@ -5,6 +5,7 @@ from meshweaver.network.transport import start_udp_server
 from meshweaver.dht.storage import (
     DHTStorage,
 )
+
 from meshweaver.scheduler.load_balancer import (
     select_best_peer,
 )
@@ -13,22 +14,28 @@ from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
     TASK,
+
     FIND_NODE,
     FIND_NODE_RESPONSE,
-    create_hello,
-    create_welcome,
-    create_find_node,
-    create_find_node_response,
-    encode_message,
-    decode_message,
+
     STORE,
     FIND_VALUE,
     STORE_RESPONSE,
     FIND_VALUE_RESPONSE,
+
+    create_hello,
+    create_welcome,
+
+    create_find_node,
+    create_find_node_response,
+
     create_store,
     create_find_value,
     create_store_response,
     create_find_value_response,
+
+    encode_message,
+    decode_message,
 )
 
 from meshweaver.task.network import (
@@ -39,10 +46,6 @@ from meshweaver.network.gossip import (
     GOSSIP,
     gossip_loop,
 )
-
-# =========================================================
-# KAD MELIA DHT
-# =========================================================
 
 from meshweaver.dht.node_id import (
     generate_node_id,
@@ -79,23 +82,10 @@ class MeshNode:
         # EXISTING PEER NETWORK
         # =================================================
 
-        # Known peers
         self.peers = set()
-
-        # CPU/RAM information received from peers
-        #
-        # Example:
-        #
-        # {
-        #     "NODE_B": {
-        #         "cpu": 20.5,
-        #         "memory": 40.2
-        #     }
-        # }
 
         self.peer_loads = {}
 
-        # Initial peers used for discovery
         self.bootstrap_peers = (
             bootstrap_peers or []
         )
@@ -104,22 +94,17 @@ class MeshNode:
         # KAD MELIA DHT
         # =================================================
 
-        # Generate a deterministic 160-bit
-        # DHT node ID from the MeshWeaver node ID.
-
         self.dht_node_id = generate_node_id(
             self.node_id
         )
-
-        # Create Kademlia routing table.
 
         self.routing_table = RoutingTable(
             self.dht_node_id
         )
 
         # =================================================
-# DHT STORAGE
-# =================================================
+        # DHT STORAGE
+        # =================================================
 
         self.dht_storage = DHTStorage()
 
@@ -131,8 +116,15 @@ class MeshNode:
 
         print("=" * 60)
         print("Starting MeshWeaver Node")
-        print(f"Node ID : {self.node_id}")
-        print(f"Address : {self.host}:{self.port}")
+
+        print(
+            f"Node ID : {self.node_id}"
+        )
+
+        print(
+            f"Address : "
+            f"{self.host}:{self.port}"
+        )
 
         print(
             f"DHT ID  : "
@@ -145,21 +137,19 @@ class MeshNode:
 
         await start_udp_server(self)
 
-        # Give UDP server time to initialize
-
         await asyncio.sleep(1)
 
-        # Initial peer discovery
+        # Initial discovery
 
         await self.discover_peers()
 
-        # Periodic peer discovery
+        # Periodic discovery
 
         asyncio.create_task(
             self.discovery_loop()
         )
 
-        # Periodic CPU/RAM gossip
+        # Periodic gossip
 
         asyncio.create_task(
             gossip_loop(self)
@@ -189,8 +179,6 @@ class MeshNode:
         )
 
         for peer in self.bootstrap_peers:
-
-            # Don't send HELLO to ourselves
 
             if (
                 peer[0] == self.host
@@ -255,12 +243,20 @@ class MeshNode:
             "type"
         )
 
+        # -------------------------------------------------
+        # HELLO
+        # -------------------------------------------------
+
         if message_type == HELLO:
 
             await self.handle_hello(
                 message,
                 addr,
             )
+
+        # -------------------------------------------------
+        # WELCOME
+        # -------------------------------------------------
 
         elif message_type == WELCOME:
 
@@ -269,6 +265,10 @@ class MeshNode:
                 addr,
             )
 
+        # -------------------------------------------------
+        # GOSSIP
+        # -------------------------------------------------
+
         elif message_type == GOSSIP:
 
             await self.handle_gossip(
@@ -276,52 +276,86 @@ class MeshNode:
                 addr,
             )
 
+        # -------------------------------------------------
+        # TASK
+        # -------------------------------------------------
+
         elif message_type == TASK:
 
             await self.handle_task(
                 message,
                 addr,
             )
+
+        # -------------------------------------------------
+        # FIND NODE
+        # -------------------------------------------------
+
         elif message_type == FIND_NODE:
+
             await self.handle_find_node(
                 message,
                 addr,
             )
 
+        # -------------------------------------------------
+        # FIND NODE RESPONSE
+        # -------------------------------------------------
+
         elif message_type == FIND_NODE_RESPONSE:
+
             await self.handle_find_node_response(
                 message,
                 addr,
             )
 
+        # -------------------------------------------------
+        # STORE
+        # -------------------------------------------------
+
         elif message_type == STORE:
 
             await self.handle_store(
-        message,
-        addr,
-    )
+                message,
+                addr,
+            )
+
+        # -------------------------------------------------
+        # FIND VALUE
+        # -------------------------------------------------
 
         elif message_type == FIND_VALUE:
 
             await self.handle_find_value(
-        message,
-        addr,
-    )
+                message,
+                addr,
+            )
+
+        # -------------------------------------------------
+        # STORE RESPONSE
+        # -------------------------------------------------
 
         elif message_type == STORE_RESPONSE:
 
             await self.handle_store_response(
-        message,
-        addr,
-    )
+                message,
+                addr,
+            )
+
+        # -------------------------------------------------
+        # FIND VALUE RESPONSE
+        # -------------------------------------------------
 
         elif message_type == FIND_VALUE_RESPONSE:
 
             await self.handle_find_value_response(
-        message,
-        addr,
-    )
-        
+                message,
+                addr,
+            )
+
+        # -------------------------------------------------
+        # UNKNOWN
+        # -------------------------------------------------
 
         else:
 
@@ -330,186 +364,6 @@ class MeshNode:
                 f"Unknown message type: "
                 f"{message_type}"
             )
-
-        # =====================================================
-    # KAD MELIA FIND_NODE
-    # =====================================================
-
-    async def handle_find_node(
-        self,
-        message,
-        addr,
-    ):
-        """
-        Handle an incoming Kademlia
-        FIND_NODE request.
-        """
-
-        requester_id = message.get(
-            "node_id"
-        )
-
-        target_hex = message.get(
-            "target_id"
-        )
-
-        if not target_hex:
-
-            print(
-                f"[{self.node_id}] "
-                "FIND_NODE missing target."
-            )
-
-            return
-
-        try:
-
-            target_id = bytes.fromhex(
-                target_hex
-            )
-
-        except ValueError:
-
-            print(
-                f"[{self.node_id}] "
-                "Invalid FIND_NODE target."
-            )
-
-            return
-
-        print(
-            f"\n[{self.node_id}] "
-            f"FIND_NODE request from "
-            f"{requester_id}"
-        )
-
-        # Find closest known peers.
-
-        closest_peers = (
-            self.routing_table.find_closest_peers(
-                target_id,
-                count=3,
-            )
-        )
-
-        response_peers = []
-
-        for peer in closest_peers:
-
-            response_peers.append(
-                {
-                    "node_id": peer.node_id.hex(),
-                    "host": peer.host,
-                    "port": peer.port,
-                }
-            )
-
-        response = (
-            create_find_node_response(
-                self.node_id,
-                response_peers,
-            )
-        )
-
-        self.transport.sendto(
-            encode_message(response),
-            addr,
-        )
-
-        print(
-            f"[{self.node_id}] "
-            f"FIND_NODE response → "
-            f"{addr}"
-        )
-
-        print(
-            f"   Returned peers: "
-            f"{len(response_peers)}"
-        )
-
-
-    async def handle_find_node_response(
-        self,
-        message,
-        addr,
-    ):
-        """
-        Process the response received
-        from a remote peer.
-        """
-
-        peer_id = message.get(
-            "node_id"
-        )
-
-        peers = message.get(
-            "peers",
-            [],
-        )
-
-        print(
-            f"\n[{self.node_id}] "
-            f"FIND_NODE response from "
-            f"{peer_id}"
-        )
-
-        if not peers:
-
-            print(
-                "   No peers returned."
-            )
-
-            return
-
-        for peer in peers:
-
-            print(
-                f"   └── "
-                f"{peer.get('host')}:"
-                f"{peer.get('port')} "
-                f"ID="
-                f"{peer.get('node_id')}"
-            )
-
-    async def find_node(
-        self,
-        peer_addr,
-        target_node_name,
-    ):
-        """
-        Ask a remote peer to find the
-        closest nodes to a target.
-        """
-
-        target_id = generate_node_id(
-            target_node_name
-        )
-
-        message = create_find_node(
-            self.node_id,
-            target_id,
-        )
-
-        self.transport.sendto(
-            encode_message(message),
-            peer_addr,
-        )
-
-        print(
-            f"\n[{self.node_id}] "
-            f"FIND_NODE → {peer_addr}"
-        )
-
-        print(
-            f"   Target: "
-            f"{target_node_name}"
-        )
-
-        print(
-            f"   Target DHT ID: "
-            f"{node_id_to_hex(target_id)}"
-        )
-    
 
     # =====================================================
     # HELLO
@@ -525,25 +379,17 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore our own message
-
         if peer_id == self.node_id:
 
             return
-
-        # Check whether this is a new peer
 
         is_new_peer = (
             addr not in self.peers
         )
 
-        # Add to existing peer table
-
         self.peers.add(
             addr
         )
-
-        # Add to Kademlia routing table
 
         self.add_peer_to_routing_table(
             peer_id,
@@ -562,8 +408,6 @@ class MeshNode:
             self.print_peers()
 
             self.print_dht_table()
-
-        # Send WELCOME response
 
         response = create_welcome(
             self.node_id,
@@ -589,25 +433,17 @@ class MeshNode:
             "node_id"
         )
 
-        # Ignore ourselves
-
         if peer_id == self.node_id:
 
             return
-
-        # Check whether this is a new peer
 
         is_new_peer = (
             addr not in self.peers
         )
 
-        # Add to existing peer table
-
         self.peers.add(
             addr
         )
-
-        # Add to Kademlia routing table
 
         self.add_peer_to_routing_table(
             peer_id,
@@ -645,13 +481,9 @@ class MeshNode:
             "load"
         )
 
-        # Ignore our own gossip
-
         if peer_id == self.node_id:
 
             return
-
-        # Validate load
 
         if not isinstance(
             load,
@@ -678,8 +510,6 @@ class MeshNode:
             )
 
             return
-
-        # Store peer load
 
         self.peer_loads[
             peer_id
@@ -742,12 +572,518 @@ class MeshNode:
             return None
 
     # =====================================================
+    # KAD MELIA FIND_NODE
+    # =====================================================
+
+    async def handle_find_node(
+        self,
+        message,
+        addr,
+    ):
+
+        requester_id = message.get(
+            "node_id"
+        )
+
+        target_hex = message.get(
+            "target_id"
+        )
+
+        if not target_hex:
+
+            print(
+                f"[{self.node_id}] "
+                f"FIND_NODE missing target."
+            )
+
+            return
+
+        try:
+
+            target_id = bytes.fromhex(
+                target_hex
+            )
+
+        except ValueError:
+
+            print(
+                f"[{self.node_id}] "
+                f"Invalid FIND_NODE target."
+            )
+
+            return
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE request from "
+            f"{requester_id}"
+        )
+
+        closest_peers = (
+            self.routing_table.find_closest_peers(
+                target_id,
+                count=3,
+            )
+        )
+
+        response_peers = []
+
+        for peer in closest_peers:
+
+            response_peers.append(
+                {
+                    "node_id":
+                        peer.node_id.hex(),
+
+                    "host":
+                        peer.host,
+
+                    "port":
+                        peer.port,
+                }
+            )
+
+        response = (
+            create_find_node_response(
+                self.node_id,
+                response_peers,
+            )
+        )
+
+        self.transport.sendto(
+            encode_message(response),
+            addr,
+        )
+
+        print(
+            f"[{self.node_id}] "
+            f"FIND_NODE response → "
+            f"{addr}"
+        )
+
+        print(
+            f"   Returned peers: "
+            f"{len(response_peers)}"
+        )
+
+    # =====================================================
+    # FIND_NODE RESPONSE
+    # =====================================================
+
+    async def handle_find_node_response(
+        self,
+        message,
+        addr,
+    ):
+
+        peer_id = message.get(
+            "node_id"
+        )
+
+        peers = message.get(
+            "peers",
+            [],
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE response from "
+            f"{peer_id}"
+        )
+
+        if not peers:
+
+            print(
+                "   No peers returned."
+            )
+
+            return
+
+        for peer in peers:
+
+            print(
+                f"   └── "
+                f"{peer.get('host')}:"
+                f"{peer.get('port')} "
+                f"ID="
+                f"{peer.get('node_id')}"
+            )
+
+    # =====================================================
+    # SEND FIND_NODE
+    # =====================================================
+
+    async def find_node(
+        self,
+        peer_addr,
+        target_node_name,
+    ):
+
+        target_id = generate_node_id(
+            target_node_name
+        )
+
+        message = create_find_node(
+            self.node_id,
+            target_id,
+        )
+
+        self.transport.sendto(
+            encode_message(message),
+            peer_addr,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_NODE → "
+            f"{peer_addr}"
+        )
+
+        print(
+            f"   Target: "
+            f"{target_node_name}"
+        )
+
+        print(
+            f"   Target DHT ID: "
+            f"{node_id_to_hex(target_id)}"
+        )
+
+    # =====================================================
+    # DHT STORE
+    # =====================================================
+
+    async def handle_store(
+        self,
+        message,
+        addr,
+    ):
+
+        requester_id = message.get(
+            "node_id"
+        )
+
+        key = message.get(
+            "key"
+        )
+
+        value = message.get(
+            "value"
+        )
+
+        if not key:
+
+            print(
+                f"[{self.node_id}] "
+                f"STORE request missing key."
+            )
+
+            return
+
+        try:
+
+            self.dht_storage.store(
+                key,
+                value,
+            )
+
+            success = True
+
+            print(
+                f"\n[{self.node_id}] "
+                f"STORE received from "
+                f"{requester_id}"
+            )
+
+            print(
+                f"   Key   : {key}"
+            )
+
+            print(
+                f"   Value : {value}"
+            )
+
+        except Exception as exc:
+
+            success = False
+
+            print(
+                f"[{self.node_id}] "
+                f"STORE failed: "
+                f"{exc}"
+            )
+
+        response = create_store_response(
+            self.node_id,
+            key,
+            success,
+        )
+
+        self.transport.sendto(
+            encode_message(response),
+            addr,
+        )
+
+    # =====================================================
+    # FIND_VALUE
+    # =====================================================
+
+    async def handle_find_value(
+        self,
+        message,
+        addr,
+    ):
+
+        requester_id = message.get(
+            "node_id"
+        )
+
+        key = message.get(
+            "key"
+        )
+
+        if not key:
+
+            print(
+                f"[{self.node_id}] "
+                f"FIND_VALUE missing key."
+            )
+
+            return
+
+        value = self.dht_storage.get(
+            key
+        )
+
+        found = value is not None
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_VALUE from "
+            f"{requester_id}"
+        )
+
+        print(
+            f"   Key   : {key}"
+        )
+
+        print(
+            f"   Found : {found}"
+        )
+
+        response = (
+            create_find_value_response(
+                self.node_id,
+                key,
+                value,
+                found,
+            )
+        )
+
+        self.transport.sendto(
+            encode_message(response),
+            addr,
+        )
+
+    # =====================================================
+    # STORE RESPONSE
+    # =====================================================
+
+    async def handle_store_response(
+        self,
+        message,
+        addr,
+    ):
+
+        peer_id = message.get(
+            "node_id"
+        )
+
+        key = message.get(
+            "key"
+        )
+
+        success = message.get(
+            "success",
+            False,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"STORE response from "
+            f"{peer_id}"
+        )
+
+        print(
+            f"   Key     : {key}"
+        )
+
+        print(
+            f"   Success : {success}"
+        )
+
+    # =====================================================
+    # FIND_VALUE RESPONSE
+    # =====================================================
+
+    async def handle_find_value_response(
+        self,
+        message,
+        addr,
+    ):
+
+        peer_id = message.get(
+            "node_id"
+        )
+
+        key = message.get(
+            "key"
+        )
+
+        value = message.get(
+            "value"
+        )
+
+        found = message.get(
+            "found",
+            False,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_VALUE response from "
+            f"{peer_id}"
+        )
+
+        print(
+            f"   Key   : {key}"
+        )
+
+        print(
+            f"   Found : {found}"
+        )
+
+        if found:
+
+            print(
+                f"   Value : {value}"
+            )
+
+        else:
+
+            print(
+                "   Value not found."
+            )
+
+    # =====================================================
+    # SEND STORE
+    # =====================================================
+
+    async def store_value(
+        self,
+        peer_addr,
+        key,
+        value,
+    ):
+
+        message = create_store(
+            self.node_id,
+            key,
+            value,
+        )
+
+        self.transport.sendto(
+            encode_message(message),
+            peer_addr,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"STORE → {peer_addr}"
+        )
+
+        print(
+            f"   Key   : {key}"
+        )
+
+        print(
+            f"   Value : {value}"
+        )
+
+    # =====================================================
+    # SEND FIND_VALUE
+    # =====================================================
+
+    async def find_value(
+        self,
+        peer_addr,
+        key,
+    ):
+
+        message = create_find_value(
+            self.node_id,
+            key,
+        )
+
+        self.transport.sendto(
+            encode_message(message),
+            peer_addr,
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_VALUE → "
+            f"{peer_addr}"
+        )
+
+        print(
+            f"   Key: {key}"
+        )
+
+    # =====================================================
+    # LOCAL DHT STORAGE
+    # =====================================================
+
+    def print_dht_storage(self):
+
+        print()
+
+        print(
+            f"[{self.node_id}] "
+            f"DHT STORAGE"
+        )
+
+        print("-" * 60)
+
+        if len(self.dht_storage) == 0:
+
+            print(
+                "Storage is empty."
+            )
+
+        else:
+
+            for key in (
+                self.dht_storage.keys()
+            ):
+
+                value = (
+                    self.dht_storage.get(
+                        key
+                    )
+                )
+
+                print(
+                    f"   {key} → {value}"
+                )
+
+        print("-" * 60)
+
+    # =====================================================
     # LOAD BALANCER
     # =====================================================
 
     def get_best_peer(self):
-
-        # No peer information available
 
         if not self.peer_loads:
 
@@ -758,8 +1094,6 @@ class MeshNode:
             )
 
             return None
-
-        # Select peer with lowest load
 
         best_peer = select_best_peer(
             self.peer_loads
@@ -827,7 +1161,7 @@ class MeshNode:
         print("-" * 60)
 
     # =====================================================
-    # KAD MELIA DHT
+    # ADD PEER TO DHT ROUTING TABLE
     # =====================================================
 
     def add_peer_to_routing_table(
@@ -841,21 +1175,14 @@ class MeshNode:
 
             return False
 
-        # Don't add ourselves
-
         if peer_id == self.node_id:
 
             return False
 
         try:
 
-            # Convert peer's MeshWeaver ID
-            # into a deterministic 160-bit ID.
-
-            peer_dht_id = (
-                generate_node_id(
-                    peer_id
-                )
+            peer_dht_id = generate_node_id(
+                peer_id
             )
 
             peer = PeerInfo(
@@ -899,7 +1226,7 @@ class MeshNode:
             return False
 
     # =====================================================
-    # DHT ROUTING TABLE
+    # PRINT DHT ROUTING TABLE
     # =====================================================
 
     def print_dht_table(self):
@@ -956,7 +1283,7 @@ class MeshNode:
         )
 
     # =====================================================
-    # FIND PEERS IN DHT BUCKET
+    # DHT BUCKET PEERS
     # =====================================================
 
     def get_dht_bucket_peers(
@@ -981,7 +1308,7 @@ class MeshNode:
         )
 
     # =====================================================
-    # REMOVE PEER FROM DHT
+    # REMOVE DHT PEER
     # =====================================================
 
     def remove_dht_peer(
@@ -1026,7 +1353,7 @@ class MeshNode:
                 f"{host}:{port}"
             )
 
-        # =====================================================
+    # =====================================================
     # DHT PEER LOOKUP
     # =====================================================
 
@@ -1035,14 +1362,12 @@ class MeshNode:
         target_node_id,
         count=3,
     ):
-        """
-        Find the closest peers to a target
-        DHT node ID.
-        """
 
-        return self.routing_table.find_closest_peers(
-            target_node_id,
-            count,
+        return (
+            self.routing_table.find_closest_peers(
+                target_node_id,
+                count,
+            )
         )
 
     # =====================================================
@@ -1054,11 +1379,6 @@ class MeshNode:
         target_node_name,
         count=3,
     ):
-        """
-        Convert a MeshWeaver node name into a
-        deterministic DHT ID and find the
-        closest peers.
-        """
 
         target_dht_id = generate_node_id(
             target_node_name
@@ -1070,6 +1390,7 @@ class MeshNode:
         )
 
         print()
+
         print(
             f"[{self.node_id}] "
             f"DHT LOOKUP: "
@@ -1101,7 +1422,8 @@ class MeshNode:
 
             print(
                 f"{index}. "
-                f"{peer.host}:{peer.port} "
+                f"{peer.host}:"
+                f"{peer.port} "
                 f"| distance={distance}"
             )
 
