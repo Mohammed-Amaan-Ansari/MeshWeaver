@@ -2,6 +2,9 @@ import asyncio
 
 from meshweaver.network.transport import start_udp_server
 
+from meshweaver.dht.storage import (
+    DHTStorage,
+)
 from meshweaver.scheduler.load_balancer import (
     select_best_peer,
 )
@@ -18,6 +21,14 @@ from meshweaver.network.discovery import (
     create_find_node_response,
     encode_message,
     decode_message,
+    STORE,
+    FIND_VALUE,
+    STORE_RESPONSE,
+    FIND_VALUE_RESPONSE,
+    create_store,
+    create_find_value,
+    create_store_response,
+    create_find_value_response,
 )
 
 from meshweaver.task.network import (
@@ -105,6 +116,12 @@ class MeshNode:
         self.routing_table = RoutingTable(
             self.dht_node_id
         )
+
+        # =================================================
+# DHT STORAGE
+# =================================================
+
+        self.dht_storage = DHTStorage()
 
     # =====================================================
     # START NODE
