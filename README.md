@@ -10,6 +10,3 @@ MeshWeaver is a pure Python peer-to-peer async task execution framework that avo
 - Load-aware task scheduling
 - Distributed task execution
 - Automatic task reassignment on node failure
-
-## Status
-Day 1 — Repository initialized
