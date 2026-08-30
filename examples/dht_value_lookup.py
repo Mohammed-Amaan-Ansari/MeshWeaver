@@ -19,4 +19,22 @@ async def main():
         node.start()
     )
 
-     
+    # Give the node time to start
+    await asyncio.sleep(3)
+
+    # Ask NODE_A for a value
+    await node.find_value(
+        ("127.0.0.1", 9001),
+        "meshweaver:test",
+    )
+
+    # Keep node alive
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+
+    except KeyboardInterrupt:
+        print("\nVALUE LOOKUP NODE stopped.")
