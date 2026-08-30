@@ -885,6 +885,29 @@ class MeshNode:
             addr,
         )
 
+    async def handle_find_value_response(self, message, addr):
+        """
+    Handle the response to a FIND_VALUE request.
+    """
+
+        peer_id = message.get("node_id")
+        key = message.get("key")
+        value = message.get("value")
+        found = message.get("found", False)
+
+        print(
+        f"\n[{self.node_id}] "
+        f"FIND_VALUE response from {peer_id}"
+    )
+
+        print(f"   Key   : {key}")
+        print(f"   Found : {found}")
+
+        if found:
+            print(f"   Value : {value}")
+        else:
+            print("   Value not found.")
+
     # =====================================================
     # STORE RESPONSE
     # =====================================================
