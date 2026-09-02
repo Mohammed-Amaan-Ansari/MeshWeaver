@@ -59,7 +59,6 @@ class MeshNode:
         node_id,
         bootstrap_peers=None,
     ):
-
         self.host = host
         self.port = port
         self.node_id = node_id
@@ -91,7 +90,7 @@ class MeshNode:
         )
 
         # =================================================
-        # KAD MELIA DHT
+        # KADEMLIA DHT
         # =================================================
 
         self.dht_node_id = generate_node_id(
@@ -131,7 +130,7 @@ class MeshNode:
 
         await asyncio.sleep(1)
 
-        # Initial discovery
+        # Initial peer discovery
         await self.discover_peers()
 
         # Periodic discovery
@@ -382,6 +381,13 @@ class MeshNode:
             addr
         )
 
+        print(
+            f"\n[{self.node_id}] "
+            f"HELLO received from "
+            f"{peer_id} at {addr}"
+        )
+
+        # Add peer to DHT routing table
         self.add_peer_to_routing_table(
             peer_id,
             addr[0],
@@ -391,7 +397,7 @@ class MeshNode:
         if is_new_peer:
 
             print(
-                f"\n[{self.node_id}] "
+                f"[{self.node_id}] "
                 f"Discovered peer: "
                 f"{peer_id}"
             )
@@ -399,15 +405,30 @@ class MeshNode:
             self.print_peers()
             self.print_dht_table()
 
+        # Create WELCOME response
         response = create_welcome(
             self.node_id,
             self.port,
         )
 
-        self.transport.sendto(
-            encode_message(response),
-            addr,
-        )
+        try:
+
+            self.transport.sendto(
+                encode_message(response),
+                addr,
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"WELCOME → {addr}"
+            )
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"WELCOME failed: {exc}"
+            )
 
     # =====================================================
     # WELCOME
@@ -434,6 +455,13 @@ class MeshNode:
             addr
         )
 
+        print(
+            f"\n[{self.node_id}] "
+            f"WELCOME received from "
+            f"{peer_id} at {addr}"
+        )
+
+        # Add peer to DHT routing table
         self.add_peer_to_routing_table(
             peer_id,
             addr[0],
@@ -443,7 +471,7 @@ class MeshNode:
         if is_new_peer:
 
             print(
-                f"\n[{self.node_id}] "
+                f"[{self.node_id}] "
                 f"Connected with peer: "
                 f"{peer_id}"
             )
@@ -830,6 +858,44 @@ class MeshNode:
                 f"{peer.get('node_id')}"
             )
 
+            # Add returned peer to routing table
+            returned_id = peer.get(
+                "node_id"
+            )
+
+            returned_host = peer.get(
+                "host"
+            )
+
+            returned_port = peer.get(
+                "port"
+            )
+
+            if (
+                returned_id
+                and returned_host
+                and returned_port
+            ):
+
+                try:
+
+                    peer_dht_id = bytes.fromhex(
+                        returned_id
+                    )
+
+                    peer_info = PeerInfo(
+                        node_id=peer_dht_id,
+                        host=returned_host,
+                        port=returned_port,
+                    )
+
+                    self.routing_table.add_peer(
+                        peer_info
+                    )
+
+                except Exception:
+                    pass
+
     async def find_node(
         self,
         peer_addr,
@@ -942,6 +1008,11 @@ class MeshNode:
             addr,
         )
 
+        print(
+            f"[{self.node_id}] "
+            f"STORE response → {addr}"
+        )
+
     # =====================================================
     # STORE VALUE REMOTELY
     # =====================================================
@@ -1027,10 +1098,11 @@ class MeshNode:
         addr,
     ):
         """
-        Handle an incoming FIND_VALUE request.
+        Look for a value in local DHT storage.
 
-        The requested key is searched in the
-        local DHT storage.
+        If found, return the value.
+
+        If not found, return the closest known peers.
         """
 
         requester_id = message.get(
@@ -1045,51 +1117,106 @@ class MeshNode:
 
             print(
                 f"[{self.node_id}] "
-                "FIND_VALUE request missing key."
+                "FIND_VALUE missing key."
             )
 
             return
 
-        # Search local storage
-        value = self.dht_storage.get(
-            key
-        )
-
-        found = (
-            value is not None
-        )
-
         print(
             f"\n[{self.node_id}] "
-            f"FIND_VALUE from "
+            f"FIND_VALUE request from "
             f"{requester_id}"
         )
 
-        print(
-            f"   Key   : {key}"
-        )
+        try:
 
-        print(
-            f"   Found : {found}"
-        )
+            value = self.dht_storage.get(
+                key
+            )
 
-        if found:
+        except Exception:
+
+            value = None
+
+        # -------------------------------------------------
+        # VALUE FOUND
+        # -------------------------------------------------
+
+        if value is not None:
+
+            print(
+                f"[{self.node_id}] "
+                f"Value found locally."
+            )
+
+            print(
+                f"   Key   : {key}"
+            )
 
             print(
                 f"   Value : {value}"
             )
 
-        # Create response
-        response = (
-            create_find_value_response(
+            response = create_find_value_response(
                 self.node_id,
                 key,
                 value,
-                found,
+                [],
             )
-        )
 
-        # Send response
+        # -------------------------------------------------
+        # VALUE NOT FOUND
+        # -------------------------------------------------
+
+        else:
+
+            print(
+                f"[{self.node_id}] "
+                f"Value not found locally."
+            )
+
+            try:
+
+                target_id = generate_node_id(
+                    key
+                )
+
+                closest_peers = (
+                    self.routing_table.find_closest_peers(
+                        target_id,
+                        count=3,
+                    )
+                )
+
+            except Exception:
+
+                closest_peers = []
+
+            response_peers = []
+
+            for peer in closest_peers:
+
+                response_peers.append(
+                    {
+                        "node_id": peer.node_id.hex(),
+                        "host": peer.host,
+                        "port": peer.port,
+                    }
+                )
+
+            response = create_find_value_response(
+                self.node_id,
+                key,
+                None,
+                response_peers,
+            )
+
+            print(
+                f"   Returning "
+                f"{len(response_peers)} "
+                f"closest peers."
+            )
+
         self.transport.sendto(
             encode_message(response),
             addr,
@@ -1102,6 +1229,88 @@ class MeshNode:
         )
 
     # =====================================================
+    # FIND VALUE RESPONSE
+    # =====================================================
+
+    async def handle_find_value_response(
+        self,
+        message,
+        addr,
+    ):
+
+        peer_id = message.get(
+            "node_id"
+        )
+
+        key = message.get(
+            "key"
+        )
+
+        value = message.get(
+            "value"
+        )
+
+        peers = message.get(
+            "peers",
+            [],
+        )
+
+        print(
+            f"\n[{self.node_id}] "
+            f"FIND_VALUE response from "
+            f"{peer_id}"
+        )
+
+        print(
+            f"   Key : {key}"
+        )
+
+        # -------------------------------------------------
+        # VALUE FOUND
+        # -------------------------------------------------
+
+        if value is not None:
+
+            print(
+                f"   Value found: "
+                f"{value}"
+            )
+
+            return value
+
+        # -------------------------------------------------
+        # VALUE NOT FOUND
+        # -------------------------------------------------
+
+        print(
+            "   Value not found."
+        )
+
+        if not peers:
+
+            print(
+                "   No additional peers returned."
+            )
+
+            return None
+
+        print(
+            "   Closest peers:"
+        )
+
+        for peer in peers:
+
+            print(
+                f"   └── "
+                f"{peer.get('host')}:"
+                f"{peer.get('port')} "
+                f"ID="
+                f"{peer.get('node_id')}"
+            )
+
+        return None
+
+    # =====================================================
     # FIND VALUE REMOTELY
     # =====================================================
 
@@ -1111,17 +1320,8 @@ class MeshNode:
         key,
     ):
         """
-        Ask a remote peer to find a value.
+        Ask a remote peer for a value.
         """
-
-        if not key:
-
-            print(
-                f"[{self.node_id}] "
-                "Cannot search for empty key."
-            )
-
-            return
 
         message = create_find_value(
             self.node_id,
@@ -1143,265 +1343,317 @@ class MeshNode:
         )
 
     # =====================================================
-    # FIND VALUE RESPONSE
+    # STORE LOCALLY
     # =====================================================
 
-    async def handle_find_value_response(
+    def store_local(
         self,
-        message,
-        addr,
+        key,
+        value,
     ):
         """
-        Handle the response received from
-        a remote peer for FIND_VALUE.
+        Store a key/value pair directly
+        in this node's DHT storage.
         """
 
-        peer_id = message.get(
-            "node_id"
-        )
+        try:
 
-        key = message.get(
-            "key"
-        )
+            self.dht_storage.store(
+                key,
+                value,
+            )
 
-        value = message.get(
-            "value"
-        )
+            print(
+                f"\n[{self.node_id}] "
+                f"Local DHT STORE"
+            )
 
-        found = message.get(
-            "found",
-            False,
-        )
-
-        print(
-            f"\n[{self.node_id}] "
-            f"FIND_VALUE response from "
-            f"{peer_id}"
-        )
-
-        print(
-            f"   Key   : {key}"
-        )
-
-        print(
-            f"   Found : {found}"
-        )
-
-        if found:
+            print(
+                f"   Key   : {key}"
+            )
 
             print(
                 f"   Value : {value}"
             )
 
-        else:
+            return True
+
+        except Exception as exc:
 
             print(
-                "   Value not found."
+                f"[{self.node_id}] "
+                f"Local storage failed: "
+                f"{exc}"
             )
 
+            return False
+
     # =====================================================
-    # DHT ROUTING TABLE
+    # GET LOCAL VALUE
+    # =====================================================
+
+    def get_local(
+        self,
+        key,
+    ):
+        """
+        Retrieve a value from local DHT storage.
+        """
+
+        try:
+
+            value = self.dht_storage.get(
+                key
+            )
+
+            print(
+                f"\n[{self.node_id}] "
+                f"Local DHT GET"
+            )
+
+            print(
+                f"   Key   : {key}"
+            )
+
+            print(
+                f"   Value : {value}"
+            )
+
+            return value
+
+        except Exception as exc:
+
+            print(
+                f"[{self.node_id}] "
+                f"Local storage lookup failed: "
+                f"{exc}"
+            )
+
+            return None
+
+    # =====================================================
+    # PRINT PEERS
+    # =====================================================
+
+    def print_peers(self):
+
+        print()
+        print(
+            f"[{self.node_id}] "
+            f"KNOWN PEERS"
+        )
+
+        print("-" * 60)
+
+        if not self.peers:
+
+            print(
+                "No peers."
+            )
+
+        else:
+
+            for host, port in self.peers:
+
+                print(
+                    f"   └── "
+                    f"{host}:{port}"
+                )
+
+        print("-" * 60)
+
+    # =====================================================
+    # PRINT DHT ROUTING TABLE
     # =====================================================
 
     def print_dht_table(self):
 
         print()
-
         print(
             f"[{self.node_id}] "
-            f"KAD MELIA ROUTING TABLE"
+            f"DHT ROUTING TABLE"
         )
 
-        print("-" * 70)
+        print("-" * 60)
 
-        total_peers = 0
+        try:
 
-        for (
-            index,
-            bucket,
-        ) in enumerate(
-            self.routing_table.buckets
-        ):
+            table = self.routing_table
 
-            if not bucket:
-                continue
+            # If the routing table exposes buckets,
+            # print their contents.
 
-            print(
-                f"Bucket {index}:"
+            buckets = getattr(
+                table,
+                "buckets",
+                None,
             )
 
-            for peer in bucket:
+            if buckets is None:
 
                 print(
-                    f"   └── "
-                    f"{peer.host}:"
-                    f"{peer.port} "
-                    f"ID="
-                    f"{node_id_to_hex(peer.node_id)}"
+                    "Routing table available."
                 )
 
-                total_peers += 1
+                print("-" * 60)
 
-        if total_peers == 0:
+                return
+
+            found = False
+
+            for index, bucket in enumerate(
+                buckets
+            ):
+
+                peers = getattr(
+                    bucket,
+                    "peers",
+                    bucket,
+                )
+
+                if not peers:
+                    continue
+
+                found = True
+
+                print(
+                    f"Bucket {index}:"
+                )
+
+                for peer in peers:
+
+                    peer_id = getattr(
+                        peer,
+                        "node_id",
+                        None,
+                    )
+
+                    host = getattr(
+                        peer,
+                        "host",
+                        "?",
+                    )
+
+                    port = getattr(
+                        peer,
+                        "port",
+                        "?",
+                    )
+
+                    if isinstance(
+                        peer_id,
+                        bytes,
+                    ):
+
+                        peer_id_display = (
+                            peer_id.hex()
+                        )
+
+                    else:
+
+                        peer_id_display = str(
+                            peer_id
+                        )
+
+                    print(
+                        f"   └── "
+                        f"{host}:{port} "
+                        f"ID={peer_id_display}"
+                    )
+
+            if not found:
+
+                print(
+                    "No routing-table peers."
+                )
+
+        except Exception as exc:
 
             print(
-                "   No DHT peers."
+                f"Unable to display "
+                f"routing table: {exc}"
             )
 
-        print("-" * 70)
-
-        print(
-            f"Total DHT peers: "
-            f"{total_peers}"
-        )
+        print("-" * 60)
 
     # =====================================================
-    # DHT BUCKET PEERS
+    # PRINT DHT STORAGE
     # =====================================================
 
-    def get_dht_bucket_peers(
-        self,
-        peer_node_id,
-    ):
-
-        return (
-            self.routing_table.find_bucket_peers(
-                peer_node_id
-            )
-        )
-
-    # =====================================================
-    # ALL DHT PEERS
-    # =====================================================
-
-    def get_all_dht_peers(self):
-
-        return (
-            self.routing_table.get_all_peers()
-        )
-
-    # =====================================================
-    # REMOVE DHT PEER
-    # =====================================================
-
-    def remove_dht_peer(
-        self,
-        peer_node_id,
-    ):
-
-        removed = (
-            self.routing_table.remove_peer(
-                peer_node_id
-            )
-        )
-
-        if removed:
-
-            print(
-                f"[{self.node_id}] "
-                f"DHT peer removed."
-            )
-
-        return removed
-
-    # =====================================================
-    # FIND CLOSEST PEERS
-    # =====================================================
-
-    def find_closest_peers(
-        self,
-        target_node_id,
-        count=3,
-    ):
-
-        return (
-            self.routing_table.find_closest_peers(
-                target_node_id,
-                count,
-            )
-        )
-
-    # =====================================================
-    # FIND CLOSEST PEERS BY NODE NAME
-    # =====================================================
-
-    def find_closest_peers_by_id(
-        self,
-        target_node_name,
-        count=3,
-    ):
-
-        target_dht_id = generate_node_id(
-            target_node_name
-        )
-
-        peers = self.find_closest_peers(
-            target_dht_id,
-            count,
-        )
+    def print_dht_storage(self):
 
         print()
-
         print(
             f"[{self.node_id}] "
-            f"DHT LOOKUP: "
-            f"{target_node_name}"
+            f"DHT STORAGE"
         )
 
         print("-" * 60)
 
-        if not peers:
+        try:
 
-            print(
-                "No peers available."
+            # Try common storage attributes.
+            data = getattr(
+                self.dht_storage,
+                "data",
+                None,
             )
 
-            print("-" * 60)
+            if data is None:
 
-            return []
-
-        for (
-            index,
-            peer,
-        ) in enumerate(
-            peers,
-            start=1,
-        ):
-
-            distance = (
-                self.routing_table.distance_to(
-                    peer.node_id
+                data = getattr(
+                    self.dht_storage,
+                    "storage",
+                    None,
                 )
-            )
+
+            if data is None:
+
+                print(
+                    "DHT storage is active."
+                )
+
+            elif not data:
+
+                print(
+                    "Storage is empty."
+                )
+
+            else:
+
+                for key, value in data.items():
+
+                    print(
+                        f"   {key} → {value}"
+                    )
+
+        except Exception as exc:
 
             print(
-                f"{index}. "
-                f"{peer.host}:{peer.port} "
-                f"| distance={distance}"
+                f"Unable to display "
+                f"DHT storage: {exc}"
             )
 
         print("-" * 60)
 
-        return peers
 
-    # =====================================================
-    # PEER TABLE
-    # =====================================================
+# =========================================================
+# NODE FACTORY
+# =========================================================
 
-    def print_peers(self):
+def create_node(
+    host,
+    port,
+    node_id,
+    bootstrap_peers=None,
+):
+    """
+    Convenience function for creating a MeshWeaver node.
+    """
 
-        print(
-            f"[{self.node_id}] "
-            f"Known peers: "
-            f"{len(self.peers)}"
-        )
-
-        for (
-            host,
-            port,
-        ) in self.peers:
-
-            print(
-                f"   └── "
-                f"{host}:{port}"
-            )
+    return MeshNode(
+        host=host,
+        port=port,
+        node_id=node_id,
+        bootstrap_peers=bootstrap_peers,
+    )
