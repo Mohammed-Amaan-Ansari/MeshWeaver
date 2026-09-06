@@ -1,6 +1,8 @@
 import cloudpickle
 
-from meshweaver.task.model import Task
+from meshweaver.task.model import (
+    Task,
+)
 
 
 def serialize_task(
@@ -11,7 +13,6 @@ def serialize_task(
         task,
         Task,
     ):
-
         raise TypeError(
             "serialize_task() expects "
             "a Task object"
@@ -30,7 +31,6 @@ def deserialize_task(
         data,
         bytes,
     ):
-
         raise TypeError(
             "deserialize_task() expects "
             "bytes"
@@ -44,7 +44,6 @@ def deserialize_task(
         task,
         Task,
     ):
-
         raise TypeError(
             "Deserialized object is "
             "not a Task"

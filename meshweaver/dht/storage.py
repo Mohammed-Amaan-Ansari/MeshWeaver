@@ -2,17 +2,18 @@ class DHTStorage:
 
     def __init__(self):
 
-        # In-memory key-value storage
         self.data = {}
 
-    # =====================================================
-    # STORE
-    # =====================================================
+    def store(
+        self,
+        key,
+        value,
+    ):
 
-    def store(self, key, value):
-
-        if not isinstance(key, str):
-
+        if not isinstance(
+            key,
+            str,
+        ):
             raise TypeError(
                 "key must be a string"
             )
@@ -21,39 +22,31 @@ class DHTStorage:
 
         return True
 
-    # =====================================================
-    # GET
-    # =====================================================
-
-    def get(self, key):
+    def get(
+        self,
+        key,
+    ):
 
         return self.data.get(key)
 
-    # =====================================================
-    # EXISTS
-    # =====================================================
-
-    def exists(self, key):
+    def exists(
+        self,
+        key,
+    ):
 
         return key in self.data
 
-    # =====================================================
-    # DELETE
-    # =====================================================
-
-    def delete(self, key):
+    def delete(
+        self,
+        key,
+    ):
 
         if key not in self.data:
-
             return False
 
         del self.data[key]
 
         return True
-
-    # =====================================================
-    # ALL KEYS
-    # =====================================================
 
     def keys(self):
 
@@ -61,9 +54,11 @@ class DHTStorage:
             self.data.keys()
         )
 
-    # =====================================================
-    # SIZE
-    # =====================================================
+    def all_items(self):
+
+        return dict(
+            self.data
+        )
 
     def __len__(self):
 

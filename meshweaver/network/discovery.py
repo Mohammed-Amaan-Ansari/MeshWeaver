@@ -1,61 +1,39 @@
 import json
 
 
+# =========================================================
+# MESSAGE TYPES
+# =========================================================
+
 HELLO = "HELLO"
-
 WELCOME = "WELCOME"
-
-TASK = "TASK"
-
-RESULT = "RESULT"
 
 GOSSIP = "GOSSIP"
 
 HEARTBEAT = "HEARTBEAT"
+HEARTBEAT_ACK = "HEARTBEAT_ACK"
+
+TASK = "TASK"
+RESULT = "RESULT"
 
 FIND_NODE = "FIND_NODE"
 FIND_NODE_RESPONSE = "FIND_NODE_RESPONSE"
 
 STORE = "STORE"
-FIND_VALUE = "FIND_VALUE"
-
 STORE_RESPONSE = "STORE_RESPONSE"
+
+FIND_VALUE = "FIND_VALUE"
 FIND_VALUE_RESPONSE = "FIND_VALUE_RESPONSE"
 
-def create_find_node(
-    node_id,
-    target_id,
-):
-    """
-    Create a Kademlia FIND_NODE request.
-    """
 
-    return {
-        "type": FIND_NODE,
-        "node_id": node_id,
-        "target_id": target_id.hex(),
-    }
+# =========================================================
+# DISCOVERY
+# =========================================================
 
-
-def create_find_node_response(
-    node_id,
-    peers,
-):
-    """
-    Create a response containing
-    the closest known peers.
-    """
-
-    return {
-        "type": FIND_NODE_RESPONSE,
-        "node_id": node_id,
-        "peers": peers,
-    }
 def create_hello(
     node_id,
     port,
 ):
-
     return {
         "type": HELLO,
         "node_id": node_id,
@@ -67,7 +45,6 @@ def create_welcome(
     node_id,
     port,
 ):
-
     return {
         "type": WELCOME,
         "node_id": node_id,
@@ -75,7 +52,65 @@ def create_welcome(
     }
 
 
-def create_result(
+# =========================================================
+# HEARTBEAT
+# =========================================================
+
+def create_heartbeat(node_id):
+
+    return {
+        "type": HEARTBEAT,
+        "node_id": node_id,
+    }
+
+
+def create_heartbeat_ack(node_id):
+
+    return {
+        "type": HEARTBEAT_ACK,
+        "node_id": node_id,
+    }
+
+
+# =========================================================
+# GOSSIP
+# =========================================================
+
+def create_gossip(
+    node_id,
+    load,
+):
+
+    return {
+        "type": GOSSIP,
+        "node_id": node_id,
+        "load": load,
+    }
+
+
+# =========================================================
+# TASK
+# =========================================================
+
+def create_task_message(
+    sender_id,
+    task_id,
+    task_data,
+):
+
+    return {
+        "type": TASK,
+        "sender_id": sender_id,
+        "task_id": task_id,
+        "task_data": task_data.hex(),
+    }
+
+
+# =========================================================
+# RESULT
+# =========================================================
+
+def create_result_message(
     sender_id,
     task_id,
     status,
@@ -93,41 +128,43 @@ def create_result(
     }
 
 
-def create_heartbeat(
+# =========================================================
+# DHT FIND NODE
+# =========================================================
+
+def create_find_node(
     node_id,
+    target_id,
 ):
 
     return {
-        "type": HEARTBEAT,
+        "type": FIND_NODE,
         "node_id": node_id,
+        "target_id": target_id.hex(),
     }
 
 
-def encode_message(
-    message,
+def create_find_node_response(
+    node_id,
+    peers,
 ):
 
-    return json.dumps(
-        message
-    ).encode("utf-8")
+    return {
+        "type": FIND_NODE_RESPONSE,
+        "node_id": node_id,
+        "peers": peers,
+    }
 
 
-def decode_message(
-    data,
-):
-
-    return json.loads(
-        data.decode("utf-8")
-    )
+# =========================================================
+# DHT STORE
+# =========================================================
 
 def create_store(
     node_id,
     key,
     value,
 ):
-    """
-    Create a DHT STORE request.
-    """
 
     return {
         "type": STORE,
@@ -137,29 +174,11 @@ def create_store(
     }
 
 
-def create_find_value(
-    node_id,
-    key,
-):
-    """
-    Create a DHT FIND_VALUE request.
-    """
-
-    return {
-        "type": FIND_VALUE,
-        "node_id": node_id,
-        "key": key,
-    }
-
-
 def create_store_response(
     node_id,
     key,
     success,
 ):
-    """
-    Create STORE response.
-    """
 
     return {
         "type": STORE_RESPONSE,
@@ -169,15 +188,29 @@ def create_store_response(
     }
 
 
+# =========================================================
+# DHT FIND VALUE
+# =========================================================
+
+def create_find_value(
+    node_id,
+    key,
+):
+
+    return {
+        "type": FIND_VALUE,
+        "node_id": node_id,
+        "key": key,
+    }
+
+
 def create_find_value_response(
     node_id,
     key,
-    value,
-    found,
+    value=None,
+    found=False,
+    peers=None,
 ):
-    """
-    Create FIND_VALUE response.
-    """
 
     return {
         "type": FIND_VALUE_RESPONSE,
@@ -185,4 +218,24 @@ def create_find_value_response(
         "key": key,
         "value": value,
         "found": found,
+        "peers": peers or [],
     }
+
+
+# =========================================================
+# SERIALIZATION
+# =========================================================
+
+def encode_message(message):
+
+    return json.dumps(
+        message,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def decode_message(data):
+
+    return json.loads(
+        data.decode("utf-8")
+    )

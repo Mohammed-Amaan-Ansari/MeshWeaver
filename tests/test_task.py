@@ -3,53 +3,84 @@ from meshweaver.task.model import (
     TaskStatus,
 )
 
+from meshweaver.task.executor import (
+    execute_task,
+)
 
-def test_task_creation():
+from meshweaver.task.serializer import (
+    serialize_task,
+    deserialize_task,
+)
+
+
+def add(a, b):
+
+    return a + b
+
+
+def test_task_execution():
 
     task = Task(
-        function_name="add",
+        function=add,
         args=(10, 20),
     )
 
-    assert task.status == TaskStatus.PENDING
-    assert task.function_name == "add"
-    assert task.args == (10, 20)
+    execute_task(task)
 
-
-def test_task_lifecycle():
-
-    task = Task(
-        function_name="add",
-        args=(10, 20),
+    assert (
+        task.status
+        == TaskStatus.COMPLETED
     )
 
-    assert task.status == TaskStatus.PENDING
-
-    task.assign("NODE_B")
-
-    assert task.status == TaskStatus.ASSIGNED
-    assert task.assigned_peer == "NODE_B"
-
-    task.start()
-
-    assert task.status == TaskStatus.RUNNING
-
-    task.complete(30)
-
-    assert task.status == TaskStatus.COMPLETED
     assert task.result == 30
 
 
 def test_task_failure():
 
+    def broken():
+        raise ValueError(
+            "Something went wrong"
+        )
+
     task = Task(
-        function_name="divide",
-        args=(10, 0),
+        function=broken
     )
 
-    task.assign("NODE_B")
-    task.start()
-    task.fail("Division by zero")
+    execute_task(task)
 
-    assert task.status == TaskStatus.FAILED
-    assert task.error == "Division by zero"
+    assert (
+        task.status
+        == TaskStatus.FAILED
+    )
+
+
+def test_task_serialization():
+
+    task = Task(
+        function=add,
+        args=(5, 7),
+    )
+
+    data = serialize_task(
+        task
+    )
+
+    restored = deserialize_task(
+        data
+    )
+
+    assert isinstance(
+        restored,
+        Task,
+    )
+
+    assert restored.args == (
+        5,
+        7,
+    )
+
+    execute_task(
+        restored
+    )
+
+    assert restored.result == 12

@@ -1,6 +1,8 @@
 import asyncio
 
-from meshweaver.node import MeshNode
+from meshweaver.node import (
+    MeshNode,
+)
 
 
 async def main():
@@ -9,6 +11,7 @@ async def main():
         host="127.0.0.1",
         port=9001,
         node_id="NODE_A",
+
         bootstrap_peers=[
             ("127.0.0.1", 9002),
         ],
@@ -19,4 +22,14 @@ async def main():
 
 if __name__ == "__main__":
 
-    asyncio.run(main())
+    try:
+
+        asyncio.run(
+            main()
+        )
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nNODE_A stopped."
+        )

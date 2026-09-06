@@ -1,94 +1,109 @@
 import hashlib
-import secrets
 
 
 ID_BITS = 160
-ID_BYTES = ID_BITS // 8
+ID_BYTES = 20
 
 
-def generate_node_id(node_name=None):
-    """
-    Generate a 160-bit identifier for a MeshWeaver node.
+def generate_node_id(
+    node_name: str,
+) -> bytes:
 
-    If node_name is provided, the ID is generated
-    deterministically from that name.
+    if not isinstance(
+        node_name,
+        str,
+    ):
+        raise TypeError(
+            "node_name must be a string"
+        )
 
-    Otherwise, a random 160-bit ID is generated.
-    """
-
-    if node_name is not None:
-
-        digest = hashlib.sha1(
-            node_name.encode("utf-8")
-        ).digest()
-
-        return digest
-
-    return secrets.token_bytes(ID_BYTES)
+    return hashlib.sha1(
+        node_name.encode("utf-8")
+    ).digest()
 
 
-def node_id_to_int(node_id):
-    """
-    Convert a 160-bit node ID into an integer.
-    """
+def node_id_to_hex(
+    node_id: bytes,
+) -> str:
 
-    if not isinstance(node_id, bytes):
-
+    if not isinstance(
+        node_id,
+        bytes,
+    ):
         raise TypeError(
             "node_id must be bytes"
         )
 
     if len(node_id) != ID_BYTES:
-
         raise ValueError(
-            f"node_id must be "
-            f"{ID_BYTES} bytes"
-        )
-
-    return int.from_bytes(
-        node_id,
-        byteorder="big",
-    )
-
-
-def node_id_to_hex(node_id):
-    """
-    Convert node ID into readable hexadecimal form.
-    """
-
-    if not isinstance(node_id, bytes):
-
-        raise TypeError(
-            "node_id must be bytes"
+            "node_id must contain "
+            "20 bytes"
         )
 
     return node_id.hex()
 
 
-def xor_distance(node_id_a, node_id_b):
-    """
-    Calculate XOR distance between two node IDs.
+def hex_to_node_id(
+    value: str,
+) -> bytes:
 
-    Kademlia uses XOR distance to determine
-    how close two nodes are in the DHT.
-    """
+    if not isinstance(
+        value,
+        str,
+    ):
+        raise TypeError(
+            "value must be a string"
+        )
+
+    result = bytes.fromhex(value)
+
+    if len(result) != ID_BYTES:
+        raise ValueError(
+            "DHT ID must contain 20 bytes"
+        )
+
+    return result
+
+
+def xor_distance(
+    node_id_a: bytes,
+    node_id_b: bytes,
+) -> int:
+
+    if not isinstance(
+        node_id_a,
+        bytes,
+    ):
+        raise TypeError(
+            "First node ID must be bytes"
+        )
+
+    if not isinstance(
+        node_id_b,
+        bytes,
+    ):
+        raise TypeError(
+            "Second node ID must be bytes"
+        )
 
     if len(node_id_a) != ID_BYTES:
-
         raise ValueError(
             "Invalid first node ID"
         )
 
     if len(node_id_b) != ID_BYTES:
-
         raise ValueError(
             "Invalid second node ID"
         )
 
-    return int.from_bytes(
-        node_id_a,
-        byteorder="big",
-    ) ^ int.from_bytes(
-        node_id_b,
-        byteorder="big",
+    return (
+        int.from_bytes(
+            node_id_a,
+            byteorder="big",
+        )
+        ^
+        int.from_bytes(
+            node_id_b,
+            byteorder="big",
+        )
     )
