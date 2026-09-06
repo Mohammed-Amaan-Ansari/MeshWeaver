@@ -86,6 +86,15 @@ from meshweaver.task.executor import (
     execute_task,
 )
 
+# =========================================================
+# WEEK 4 - DAY 2 SECURITY CONFIGURATION
+# =========================================================
+
+from meshweaver.security.config import (
+    SecurityConfig,
+    SecurityConfigError,
+)
+
 
 class MeshNode:
 
@@ -106,14 +115,81 @@ class MeshNode:
         # TRANSPORT SECURITY
         # =================================================
 
-        # Shared security key used by the UDP transport.
-        #
-        # Week 4 Day 1:
-        # HMAC-SHA256 authentication/integrity.
-        #
-        # NOTE:
-        # HMAC does NOT encrypt messages.
+        """
+        Week 4 Day 2:
+
+        Security configuration is now centralized.
+
+        Priority:
+
+        1. Explicit security_key passed to MeshNode
+        2. MESHWEAVER_SECURITY_KEY environment variable
+        3. Security disabled if no key is configured
+
+        HMAC-SHA256 provides:
+
+            - Authentication
+            - Message integrity
+
+        HMAC does NOT provide encryption.
+        """
+
         self.security_key = security_key
+
+        self.security_enabled = False
+
+        # -------------------------------------------------
+        # If no key was explicitly supplied, try loading
+        # the key from the environment.
+        # -------------------------------------------------
+
+        if self.security_key is None:
+
+            try:
+
+                security_config = (
+                    SecurityConfig.from_environment()
+                )
+
+                self.security_key = (
+                    security_config.key
+                )
+
+                self.security_enabled = True
+
+            except SecurityConfigError:
+
+                self.security_key = None
+                self.security_enabled = False
+
+        else:
+
+            # -------------------------------------------------
+            # Validate explicitly supplied key through
+            # SecurityConfig as well.
+            # -------------------------------------------------
+
+            try:
+
+                security_config = SecurityConfig(
+                    self.security_key
+                )
+
+                self.security_key = (
+                    security_config.key
+                )
+
+                self.security_enabled = True
+
+            except (
+                SecurityConfigError,
+                TypeError,
+            ) as exc:
+
+                raise ValueError(
+                    f"Invalid security configuration: "
+                    f"{exc}"
+                ) from exc
 
         # =================================================
         # TRANSPORT
@@ -217,13 +293,30 @@ class MeshNode:
 
         print("=" * 65)
 
-        # Start UDP transport with security.
-        #
-        # If security_key is None:
-        #     normal UDP transport
-        #
-        # If security_key is provided:
-        #     HMAC-SHA256 protected UDP transport
+        # -------------------------------------------------
+        # SECURITY STATUS
+        # -------------------------------------------------
+
+        if self.security_enabled:
+
+            print(
+                f"[{self.node_id}] "
+                f"Security configuration: "
+                f"HMAC-SHA256 enabled"
+            )
+
+        else:
+
+            print(
+                f"[{self.node_id}] "
+                f"Security configuration: "
+                f"DISABLED"
+            )
+
+        # -------------------------------------------------
+        # START UDP TRANSPORT
+        # -------------------------------------------------
+
         await start_udp_server(
             self,
             security_key=self.security_key,
@@ -1435,6 +1528,22 @@ class MeshNode:
     # =====================================================
 
     async def start_components(self):
+
+        if self.security_enabled:
+
+            print(
+                f"[{self.node_id}] "
+                f"Security configuration: "
+                f"HMAC-SHA256 enabled"
+            )
+
+        else:
+
+            print(
+                f"[{self.node_id}] "
+                f"Security configuration: "
+                f"DISABLED"
+            )
 
         await start_udp_server(
             self,

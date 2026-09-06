@@ -1,3 +1,15 @@
+"""
+MeshWeaver transport security.
+
+Provides:
+
+- HMAC-SHA256 authentication
+- Message integrity
+- Peer authentication helpers
+
+Does NOT provide encryption.
+"""
+
 import hashlib
 import hmac
 import secrets
@@ -6,31 +18,28 @@ import secrets
 class TransportSecurityError(Exception):
     """Base exception for transport security errors."""
 
+
 class InvalidMessageError(TransportSecurityError):
     """Raised when a received message fails authentication."""
 
+
+class PeerAuthenticationError(TransportSecurityError):
+    """Raised when peer authentication fails."""
+
+
 class TransportSecurity:
-    """
-    Provides authentication and integrity protection for UDP messages.
-
-    Day 1 uses HMAC-SHA256.
-
-    HMAC does NOT encrypt the message.
-    It guarantees that:
-        1. The message was created by someone possessing the shared key.
-        2. The message was not modified in transit.
-
-    Encryption will be added in a later security milestone using
-    a vetted cryptographic implementation.
-    """
 
     VERSION = 1
+
     TAG_SIZE = 32
     NONCE_SIZE = 16
 
     def __init__(self, key: bytes):
+
         if not isinstance(key, bytes):
-            raise TypeError("Security key must be bytes.")
+            raise TypeError(
+                "Security key must be bytes."
+            )
 
         if len(key) < 32:
             raise ValueError(
@@ -41,9 +50,6 @@ class TransportSecurity:
 
     @classmethod
     def generate_key(cls, size: int = 32) -> bytes:
-        """
-        Generate a cryptographically secure random key.
-        """
 
         if size < 32:
             raise ValueError(
@@ -57,9 +63,6 @@ class TransportSecurity:
         nonce: bytes,
         payload: bytes,
     ) -> bytes:
-        """
-        Calculate HMAC-SHA256 over the nonce and payload.
-        """
 
         return hmac.new(
             self.key,
@@ -67,19 +70,10 @@ class TransportSecurity:
             hashlib.sha256,
         ).digest()
 
-    def protect(self, payload: bytes) -> bytes:
-        """
-        Add authentication/integrity information to a payload.
-
-        Packet format:
-
-            VERSION | NONCE | PAYLOAD | HMAC
-
-        Note:
-            PAYLOAD remains readable.
-            This is intentional for Day 1 because this layer
-            provides authentication/integrity, not encryption.
-        """
+    def protect(
+        self,
+        payload: bytes,
+    ) -> bytes:
 
         if not isinstance(payload, bytes):
             raise TypeError(
@@ -102,10 +96,10 @@ class TransportSecurity:
             + tag
         )
 
-    def unprotect(self, packet: bytes) -> bytes:
-        """
-        Verify and extract the original payload.
-        """
+    def unprotect(
+        self,
+        packet: bytes,
+    ) -> bytes:
 
         if not isinstance(packet, bytes):
             raise TypeError(
@@ -119,6 +113,7 @@ class TransportSecurity:
         )
 
         if len(packet) < minimum_size:
+
             raise InvalidMessageError(
                 "Secure packet is too short."
             )
@@ -126,6 +121,7 @@ class TransportSecurity:
         version = packet[0]
 
         if version != self.VERSION:
+
             raise InvalidMessageError(
                 f"Unsupported security version: {version}"
             )
@@ -141,7 +137,10 @@ class TransportSecurity:
             nonce_start:nonce_end
         ]
 
-        tag_start = len(packet) - self.TAG_SIZE
+        tag_start = (
+            len(packet)
+            - self.TAG_SIZE
+        )
 
         payload = packet[
             nonce_end:tag_start
@@ -160,8 +159,89 @@ class TransportSecurity:
             received_tag,
             expected_tag,
         ):
+
             raise InvalidMessageError(
                 "Message authentication failed."
             )
 
         return payload
+
+    # ---------------------------------------------------------
+    # PEER AUTHENTICATION
+    # ---------------------------------------------------------
+
+    def create_peer_challenge(self) -> bytes:
+        """
+        Create a random challenge for peer authentication.
+        """
+
+        return secrets.token_bytes(
+            self.NONCE_SIZE
+        )
+
+    def create_peer_response(
+        self,
+        challenge: bytes,
+        peer_id: str,
+    ) -> bytes:
+        """
+        Create an HMAC response to a peer challenge.
+
+        The peer ID is included so the authentication response
+        is bound to the expected peer identity.
+        """
+
+        if not isinstance(
+            challenge,
+            bytes,
+        ):
+            raise TypeError(
+                "Challenge must be bytes."
+            )
+
+        if not isinstance(
+            peer_id,
+            str,
+        ):
+            raise TypeError(
+                "Peer ID must be a string."
+            )
+
+        message = (
+            b"PEER_AUTH:"
+            + peer_id.encode("utf-8")
+            + b":"
+            + challenge
+        )
+
+        return hmac.new(
+            self.key,
+            message,
+            hashlib.sha256,
+        ).digest()
+
+    def verify_peer_response(
+        self,
+        challenge: bytes,
+        peer_id: str,
+        response: bytes,
+    ) -> bool:
+        """
+        Verify a peer authentication response.
+        """
+
+        expected = self.create_peer_response(
+            challenge,
+            peer_id,
+        )
+
+        if not hmac.compare_digest(
+            response,
+            expected,
+        ):
+
+            raise PeerAuthenticationError(
+                f"Peer authentication failed: {peer_id}"
+            )
+
+        return True
