@@ -95,11 +95,25 @@ class MeshNode:
         port,
         node_id,
         bootstrap_peers=None,
+        security_key=None,
     ):
 
         self.host = host
         self.port = port
         self.node_id = node_id
+
+        # =================================================
+        # TRANSPORT SECURITY
+        # =================================================
+
+        # Shared security key used by the UDP transport.
+        #
+        # Week 4 Day 1:
+        # HMAC-SHA256 authentication/integrity.
+        #
+        # NOTE:
+        # HMAC does NOT encrypt messages.
+        self.security_key = security_key
 
         # =================================================
         # TRANSPORT
@@ -186,21 +200,33 @@ class MeshNode:
 
         print("=" * 65)
         print("Starting MeshWeaver Node")
+
         print(
             f"Node ID : {self.node_id}"
         )
+
         print(
             f"Address : "
             f"{self.host}:{self.port}"
         )
+
         print(
             f"DHT ID  : "
             f"{node_id_to_hex(self.dht_node_id)}"
         )
+
         print("=" * 65)
 
+        # Start UDP transport with security.
+        #
+        # If security_key is None:
+        #     normal UDP transport
+        #
+        # If security_key is provided:
+        #     HMAC-SHA256 protected UDP transport
         await start_udp_server(
-            self
+            self,
+            security_key=self.security_key,
         )
 
         await asyncio.sleep(1)
@@ -1085,9 +1111,6 @@ class MeshNode:
         peer_id,
     ):
 
-        # Remove peer from routing
-        # and available worker list.
-
         addr = self.peer_addresses.get(
             peer_id
         )
@@ -1161,7 +1184,6 @@ class MeshNode:
                 f"marked FAILED."
             )
 
-            # Try re-routing
             if task.can_retry():
 
                 print(
@@ -1361,6 +1383,7 @@ class MeshNode:
             )
 
         except Exception:
+
             success = False
 
         response = (
@@ -1407,11 +1430,15 @@ class MeshNode:
             peer_addr,
         )
 
+    # =====================================================
+    # START COMPONENTS
+    # =====================================================
 
     async def start_components(self):
 
         await start_udp_server(
-            self
+            self,
+            security_key=self.security_key,
         )
 
         await asyncio.sleep(1)
@@ -1436,7 +1463,7 @@ class MeshNode:
                 failure_detection_loop(
                     self
                 )
-            )
+            ),
         ]
 
         print(
@@ -1683,11 +1710,16 @@ class MeshNode:
             )
 
 
+# =========================================================
+# NODE FACTORY
+# =========================================================
+
 def create_node(
     host,
     port,
     node_id,
     bootstrap_peers=None,
+    security_key=None,
 ):
 
     return MeshNode(
@@ -1695,4 +1727,5 @@ def create_node(
         port=port,
         node_id=node_id,
         bootstrap_peers=bootstrap_peers,
+        security_key=security_key,
     )

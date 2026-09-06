@@ -5,6 +5,10 @@ from meshweaver.node import (
 )
 
 
+# Week 4 Day 1 development security key
+SECURITY_KEY = b"12345678901234567890123456789012"
+
+
 async def main():
 
     node = MeshNode(
@@ -15,6 +19,8 @@ async def main():
         bootstrap_peers=[
             ("127.0.0.1", 9002),
         ],
+
+        security_key=SECURITY_KEY,
     )
 
     await node.start()
