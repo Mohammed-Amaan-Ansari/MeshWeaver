@@ -8,6 +8,9 @@ from meshweaver.network.transport import (
 from meshweaver.network.discovery import (
     HELLO,
     WELCOME,
+    AUTH_CHALLENGE,
+    AUTH_RESPONSE,
+    AUTH_SUCCESS,
     GOSSIP,
     HEARTBEAT,
     HEARTBEAT_ACK,
@@ -22,6 +25,9 @@ from meshweaver.network.discovery import (
 
     create_hello,
     create_welcome,
+    create_auth_challenge,
+    create_auth_response,
+    create_auth_success,
 
     create_task_message,
     create_result_message,
@@ -93,6 +99,11 @@ from meshweaver.task.executor import (
 from meshweaver.security.config import (
     SecurityConfig,
     SecurityConfigError,
+)
+
+from meshweaver.security.transport_security import (
+    TransportSecurity,
+    PeerAuthenticationError,
 )
 
 
@@ -190,6 +201,20 @@ class MeshNode:
                     f"Invalid security configuration: "
                     f"{exc}"
                 ) from exc
+
+        # =================================================
+        # PEER AUTHENTICATION - WEEK 4 DAY 3
+        # =================================================
+
+        self.security = None
+
+        if self.security_enabled:
+            self.security = TransportSecurity(
+                self.security_key
+            )
+
+        self.authenticated_peers = set()
+        self.pending_authentication = {}
 
         # =================================================
         # TRANSPORT
@@ -501,6 +526,24 @@ class MeshNode:
                 addr,
             )
 
+        elif message_type == AUTH_CHALLENGE:
+            await self.handle_auth_challenge(
+                message,
+                addr,
+            )
+
+        elif message_type == AUTH_RESPONSE:
+            await self.handle_auth_response(
+                message,
+                addr,
+            )
+
+        elif message_type == AUTH_SUCCESS:
+            await self.handle_auth_success(
+                message,
+                addr,
+            )
+
         elif message_type == GOSSIP:
 
             await self.handle_gossip(
@@ -626,9 +669,223 @@ class MeshNode:
             addr,
         )
 
+        if self.security_enabled:
+            self.authenticate_peer(
+                peer_id,
+                addr,
+            )
+
     # =====================================================
     # WELCOME
     # =====================================================
+
+    # =====================================================
+    # PEER AUTHENTICATION
+    # =====================================================
+
+    def authenticate_peer(
+        self,
+        peer_id,
+        peer_addr,
+    ):
+        """Start HMAC challenge-response authentication."""
+        if not self.security_enabled or self.security is None:
+            return
+        if peer_id in self.authenticated_peers:
+            return
+        if peer_id in self.pending_authentication:
+            return
+
+        challenge = self.security.create_peer_challenge()
+        self.pending_authentication[peer_id] = challenge
+
+        message = create_auth_challenge(
+            self.node_id,
+            challenge,
+        )
+
+        try:
+            self.transport.sendto(
+                encode_message(message),
+                peer_addr,
+            )
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_CHALLENGE → {peer_id}"
+            )
+        except Exception as exc:
+            self.pending_authentication.pop(peer_id, None)
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_CHALLENGE error: {exc}"
+            )
+
+    async def handle_auth_challenge(
+        self,
+        message,
+        addr,
+    ):
+        """Respond to a peer authentication challenge."""
+        if not self.security_enabled or self.security is None:
+            return
+
+        peer_id = message.get("node_id")
+        challenge_hex = message.get("challenge")
+
+        if not peer_id or not challenge_hex:
+            print(
+                f"[{self.node_id}] "
+                f"Invalid AUTH_CHALLENGE from {addr}"
+            )
+            return
+
+        if peer_id == self.node_id:
+            return
+
+        try:
+            challenge = bytes.fromhex(challenge_hex)
+        except (TypeError, ValueError):
+            print(
+                f"[{self.node_id}] "
+                f"Invalid authentication challenge from {peer_id}"
+            )
+            return
+
+        self.register_peer(peer_id, addr)
+
+        response = self.security.create_peer_response(
+            challenge,
+            self.node_id,
+        )
+
+        response_message = create_auth_response(
+            self.node_id,
+            challenge,
+            response,
+        )
+
+        try:
+            self.transport.sendto(
+                encode_message(response_message),
+                addr,
+            )
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_RESPONSE → {peer_id}"
+            )
+        except Exception as exc:
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_RESPONSE error: {exc}"
+            )
+
+    async def handle_auth_response(
+        self,
+        message,
+        addr,
+    ):
+        """Verify a peer's HMAC authentication response."""
+        if not self.security_enabled or self.security is None:
+            return
+
+        peer_id = message.get("node_id")
+        challenge_hex = message.get("challenge")
+        response_hex = message.get("response")
+
+        if not peer_id or not challenge_hex or not response_hex:
+            print(
+                f"[{self.node_id}] "
+                f"Invalid AUTH_RESPONSE from {peer_id}"
+            )
+            return
+
+        pending_challenge = self.pending_authentication.get(peer_id)
+        if pending_challenge is None:
+            print(
+                f"[{self.node_id}] "
+                f"Unexpected AUTH_RESPONSE from {peer_id}"
+            )
+            return
+
+        try:
+            challenge = bytes.fromhex(challenge_hex)
+            response = bytes.fromhex(response_hex)
+        except (TypeError, ValueError):
+            self.pending_authentication.pop(peer_id, None)
+            print(
+                f"[{self.node_id}] "
+                f"Invalid AUTH_RESPONSE encoding from {peer_id}"
+            )
+            return
+
+        if challenge != pending_challenge:
+            self.pending_authentication.pop(peer_id, None)
+            print(
+                f"[{self.node_id}] "
+                f"Authentication challenge mismatch from {peer_id}"
+            )
+            return
+
+        try:
+            self.security.verify_peer_response(
+                challenge,
+                peer_id,
+                response,
+            )
+        except PeerAuthenticationError as exc:
+            self.pending_authentication.pop(peer_id, None)
+            print(
+                f"[{self.node_id}] "
+                f"Peer authentication failed: {exc}"
+            )
+            return
+
+        self.authenticated_peers.add(peer_id)
+        self.pending_authentication.pop(peer_id, None)
+        self.register_peer(peer_id, addr)
+
+        print(
+            f"[{self.node_id}] "
+            f"PEER AUTHENTICATED: {peer_id}"
+        )
+
+        success_message = create_auth_success(self.node_id)
+        try:
+            self.transport.sendto(
+                encode_message(success_message),
+                addr,
+            )
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_SUCCESS → {peer_id}"
+            )
+        except Exception as exc:
+            print(
+                f"[{self.node_id}] "
+                f"AUTH_SUCCESS error: {exc}"
+            )
+
+    async def handle_auth_success(
+        self,
+        message,
+        addr,
+    ):
+        """Mark the peer as authenticated after success."""
+        if not self.security_enabled:
+            return
+
+        peer_id = message.get("node_id")
+        if not peer_id or peer_id == self.node_id:
+            return
+
+        self.register_peer(peer_id, addr)
+        self.authenticated_peers.add(peer_id)
+        self.pending_authentication.pop(peer_id, None)
+
+        print(
+            f"[{self.node_id}] "
+            f"PEER AUTHENTICATED: {peer_id}"
+        )
 
     async def handle_welcome(
         self,
@@ -1739,9 +1996,27 @@ class MeshNode:
             self.peers
         ):
 
+            peer_id = next(
+                (
+                    node_id
+                    for node_id, address
+                    in self.peer_addresses.items()
+                    if address == peer
+                ),
+                "UNKNOWN",
+            )
+
+            auth_status = (
+                "AUTHENTICATED"
+                if peer_id in self.authenticated_peers
+                else "NOT AUTHENTICATED"
+            )
+
             print(
                 f"   └── "
-                f"{peer[0]}:{peer[1]}"
+                f"{peer[0]}:{peer[1]} | "
+                f"{peer_id} | "
+                f"{auth_status}"
             )
 
     def print_loads(self):
