@@ -8,6 +8,14 @@ import json
 HELLO = "HELLO"
 WELCOME = "WELCOME"
 
+# ---------------------------------------------------------
+# WEEK 4 - DAY 3 SECURITY
+# ---------------------------------------------------------
+
+AUTH_CHALLENGE = "AUTH_CHALLENGE"
+AUTH_RESPONSE = "AUTH_RESPONSE"
+AUTH_SUCCESS = "AUTH_SUCCESS"
+
 GOSSIP = "GOSSIP"
 
 HEARTBEAT = "HEARTBEAT"
@@ -49,6 +57,77 @@ def create_welcome(
         "type": WELCOME,
         "node_id": node_id,
         "port": port,
+    }
+
+
+# =========================================================
+# WEEK 4 - DAY 3
+# PEER AUTHENTICATION
+# =========================================================
+
+def create_auth_challenge(
+    node_id,
+    challenge,
+):
+    """
+    Create a peer authentication challenge.
+
+    challenge must be bytes.
+    It is converted to hexadecimal so it can be
+    transported safely through JSON.
+    """
+
+    if not isinstance(challenge, bytes):
+        raise TypeError(
+            "Authentication challenge must be bytes."
+        )
+
+    return {
+        "type": AUTH_CHALLENGE,
+        "node_id": node_id,
+        "challenge": challenge.hex(),
+    }
+
+
+def create_auth_response(
+    node_id,
+    challenge,
+    response,
+):
+    """
+    Create a response to an authentication challenge.
+
+    challenge and response are bytes.
+    """
+
+    if not isinstance(challenge, bytes):
+        raise TypeError(
+            "Authentication challenge must be bytes."
+        )
+
+    if not isinstance(response, bytes):
+        raise TypeError(
+            "Authentication response must be bytes."
+        )
+
+    return {
+        "type": AUTH_RESPONSE,
+        "node_id": node_id,
+        "challenge": challenge.hex(),
+        "response": response.hex(),
+    }
+
+
+def create_auth_success(
+    node_id,
+):
+    """
+    Notify the peer that authentication succeeded.
+    """
+
+    return {
+        "type": AUTH_SUCCESS,
+        "node_id": node_id,
     }
 
 
