@@ -1194,107 +1194,94 @@ class MeshNode:
     # TASK RECEIVER
     # =====================================================
 
-    async def handle_task(
-        self,
-        message,
-        addr,
-    ):
+    async def handle_task(self, message, addr):
+        """
+    Handle an incoming TASK message.
 
-        sender_id = message.get(
-            "sender_id"
+    Only authenticated peers are allowed to submit tasks.
+    """
+
+        sender_id = message.get("sender_id")
+
+    # ---------------------------------------------------------
+    # Security check 1: sender_id must exist
+    # ---------------------------------------------------------
+        if not sender_id:
+            print(
+                f"[{self.node_id}] "
+            f"SECURITY: rejected TASK with missing sender_id "
+            f"from {addr}"
         )
+        return
 
-        task_id = message.get(
-            "task_id"
-        )
-
-        print()
-        print(
+    # ---------------------------------------------------------
+    # Security check 2: sender must be authenticated
+    # ---------------------------------------------------------
+        if sender_id not in self.authenticated_peers:
+            print(
             f"[{self.node_id}] "
-            f"TASK RECEIVED"
+            f"SECURITY: rejected TASK from "
+            f"unauthenticated peer {sender_id}"
         )
+        return
 
+    # ---------------------------------------------------------
+    # Authorized task
+    # ---------------------------------------------------------
         print(
-            f"   From : {sender_id}"
-        )
+        f"[{self.node_id}] "
+        f"Authorized TASK received from {sender_id}"
+    )
 
-        print(
-            f"   Task : {task_id}"
+        task_id = message.get("task_id")
+        task_data_hex = message.get("task_data")
+
+        if not task_id:
+            print(
+            f"[{self.node_id}] "
+            f"SECURITY: rejected TASK with missing task_id"
         )
+        return
+
+        if not task_data_hex:
+            print(
+            f"[{self.node_id}] "
+            f"SECURITY: rejected TASK with missing task_data"
+            )
+        return
 
         try:
-
-            task = extract_task(
-                message
-            )
-
-            task.assigned_peer = (
-                self.node_id
-            )
-
-            self.tasks[
-                task.task_id
-            ] = task
-
+            task_data = bytes.fromhex(task_data_hex)
+        except ValueError:
             print(
-                f"[{self.node_id}] "
-                f"Executing task..."
-            )
+            f"[{self.node_id}] "
+            f"SECURITY: rejected TASK with invalid task_data"
+        )
+        return
 
-            result_task = (
-                await asyncio.to_thread(
-                    execute_task,
-                    task,
-                )
-            )
-
-            result_message = (
-                create_result_message(
-                    self.node_id,
-                    result_task.task_id,
-                    result_task.status.value,
-                    result=result_task.result,
-                    error=result_task.error,
-                )
-            )
-
-            self.transport.sendto(
-                encode_message(
-                    result_message
-                ),
-                addr,
-            )
-
-            print(
-                f"[{self.node_id}] "
-                f"TASK {task.task_id} "
-                f"→ {result_task.status.value}"
-            )
+    # ---------------------------------------------------------
+    # Existing task processing starts here
+    # ---------------------------------------------------------
+        try:
+            await self.execute_task(
+            sender_id=sender_id,
+            task_id=task_id,
+            task_data=task_data,
+            addr=addr,
+        )
 
         except Exception as exc:
-
-            result_message = (
-                create_result_message(
-                    self.node_id,
-                    task_id,
-                    TaskStatus.FAILED.value,
-                    result=None,
-                    error=str(exc),
-                )
-            )
-
-            self.transport.sendto(
-                encode_message(
-                    result_message
-                ),
-                addr,
-            )
-
             print(
-                f"[{self.node_id}] "
-                f"TASK FAILED: {exc}"
-            )
+            f"[{self.node_id}] "
+            f"Task execution error: {exc}"
+        )
+            
 
+    def is_peer_authenticated(self, peer_id):
+        """
+    Return True if the peer has completed authentication.
+    """
+        return peer_id in self.authenticated_peers
     # =====================================================
     # RESULT
     # =====================================================
