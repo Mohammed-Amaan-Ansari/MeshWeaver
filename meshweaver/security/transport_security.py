@@ -5,6 +5,7 @@ Provides:
 
 - HMAC-SHA256 authentication
 - Message integrity
+- Replay attack protection
 - Peer authentication helpers
 
 Does NOT provide encryption.
@@ -16,11 +17,15 @@ import secrets
 
 
 class TransportSecurityError(Exception):
-    """Base exception for transport security errors."""
+    """Base exception for transport security."""
 
 
 class InvalidMessageError(TransportSecurityError):
     """Raised when a received message fails authentication."""
+
+
+class ReplayAttackError(InvalidMessageError):
+    """Raised when a packet nonce has already been used."""
 
 
 class PeerAuthenticationError(TransportSecurityError):
@@ -30,9 +35,11 @@ class PeerAuthenticationError(TransportSecurityError):
 class TransportSecurity:
 
     VERSION = 1
-
     TAG_SIZE = 32
     NONCE_SIZE = 16
+
+    # Maximum number of recently seen nonces.
+    MAX_SEEN_NONCES = 10_000
 
     def __init__(self, key: bytes):
 
@@ -47,6 +54,9 @@ class TransportSecurity:
             )
 
         self.key = key
+
+        # Nonces already accepted by this security instance.
+        self.seen_nonces = set()
 
     @classmethod
     def generate_key(cls, size: int = 32) -> bytes:
@@ -70,10 +80,7 @@ class TransportSecurity:
             hashlib.sha256,
         ).digest()
 
-    def protect(
-        self,
-        payload: bytes,
-    ) -> bytes:
+    def protect(self, payload: bytes) -> bytes:
 
         if not isinstance(payload, bytes):
             raise TypeError(
@@ -96,10 +103,7 @@ class TransportSecurity:
             + tag
         )
 
-    def unprotect(
-        self,
-        packet: bytes,
-    ) -> bytes:
+    def unprotect(self, packet: bytes) -> bytes:
 
         if not isinstance(packet, bytes):
             raise TypeError(
@@ -113,18 +117,24 @@ class TransportSecurity:
         )
 
         if len(packet) < minimum_size:
-
             raise InvalidMessageError(
                 "Secure packet is too short."
             )
 
+        # -----------------------------------------------------
+        # 1. Check security version
+        # -----------------------------------------------------
+
         version = packet[0]
 
         if version != self.VERSION:
-
             raise InvalidMessageError(
                 f"Unsupported security version: {version}"
             )
+
+        # -----------------------------------------------------
+        # 2. Extract nonce
+        # -----------------------------------------------------
 
         nonce_start = 1
 
@@ -136,6 +146,10 @@ class TransportSecurity:
         nonce = packet[
             nonce_start:nonce_end
         ]
+
+        # -----------------------------------------------------
+        # 3. Extract payload and HMAC
+        # -----------------------------------------------------
 
         tag_start = (
             len(packet)
@@ -150,6 +164,10 @@ class TransportSecurity:
             tag_start:
         ]
 
+        # -----------------------------------------------------
+        # 4. Verify HMAC
+        # -----------------------------------------------------
+
         expected_tag = self._calculate_tag(
             nonce,
             payload,
@@ -159,21 +177,47 @@ class TransportSecurity:
             received_tag,
             expected_tag,
         ):
-
             raise InvalidMessageError(
                 "Message authentication failed."
             )
 
+        # -----------------------------------------------------
+        # 5. Replay protection
+        # -----------------------------------------------------
+
+        if nonce in self.seen_nonces:
+
+            raise ReplayAttackError(
+                "Replay attack detected: "
+                "nonce has already been used."
+            )
+
+        # -----------------------------------------------------
+        # 6. Remember nonce
+        # -----------------------------------------------------
+
+        self.seen_nonces.add(nonce)
+
+        # -----------------------------------------------------
+        # 7. Prevent unlimited memory growth
+        # -----------------------------------------------------
+
+        if (
+            len(self.seen_nonces)
+            > self.MAX_SEEN_NONCES
+        ):
+            self.seen_nonces.clear()
+
+            # Keep the current nonce.
+            self.seen_nonces.add(nonce)
+
         return payload
 
-    # ---------------------------------------------------------
-    # PEER AUTHENTICATION
-    # ---------------------------------------------------------
+    # =========================================================
+    # Peer authentication
+    # =========================================================
 
     def create_peer_challenge(self) -> bytes:
-        """
-        Create a random challenge for peer authentication.
-        """
 
         return secrets.token_bytes(
             self.NONCE_SIZE
@@ -184,12 +228,6 @@ class TransportSecurity:
         challenge: bytes,
         peer_id: str,
     ) -> bytes:
-        """
-        Create an HMAC response to a peer challenge.
-
-        The peer ID is included so the authentication response
-        is bound to the expected peer identity.
-        """
 
         if not isinstance(
             challenge,
@@ -226,9 +264,6 @@ class TransportSecurity:
         peer_id: str,
         response: bytes,
     ) -> bool:
-        """
-        Verify a peer authentication response.
-        """
 
         expected = self.create_peer_response(
             challenge,
@@ -239,9 +274,9 @@ class TransportSecurity:
             response,
             expected,
         ):
-
             raise PeerAuthenticationError(
-                f"Peer authentication failed: {peer_id}"
+                f"Peer authentication failed: "
+                f"{peer_id}"
             )
 
         return True
