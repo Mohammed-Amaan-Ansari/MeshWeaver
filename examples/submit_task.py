@@ -1,22 +1,27 @@
 import asyncio
 
-from meshweaver.node import (
-    MeshNode,
-)
+from meshweaver.node import MeshNode
 
-from meshweaver.task.model import (
-    Task,
-)
+from meshweaver.task.model import Task
+
+from meshweaver.security.config import SecurityConfig
 
 
-def calculate_sum(
-    numbers,
-):
-
+def calculate_sum(numbers):
     return sum(numbers)
 
 
 async def main():
+
+    # =========================================================
+    # SECURITY CONFIGURATION
+    # =========================================================
+
+    config = SecurityConfig.development()
+
+    # =========================================================
+    # CREATE SUBMITTER NODE
+    # =========================================================
 
     node = MeshNode(
         host="127.0.0.1",
@@ -25,19 +30,41 @@ async def main():
 
         bootstrap_peers=[
             ("127.0.0.1", 9002),
-            ("127.0.0.1", 9003),
+             
         ],
+
+        # Use the same security key as the worker nodes.
+        security_key=config.key,
     )
 
-    # Start networking without
-    # blocking this example forever.
+    # =========================================================
+    # START NODE COMPONENTS
+    # =========================================================
 
+    print()
+    print("=" * 60)
+    print("Starting MeshWeaver Submitter")
+    print("=" * 60)
+
+    print("[SUBMITTER] Security configuration: ENABLED")
+
+    # Start networking without blocking this example forever.
     await node.start_components()
 
+    # Give the submitter time to discover and authenticate
+    # with the worker nodes.
     await asyncio.sleep(7)
+
+    # =========================================================
+    # DISPLAY NETWORK STATE
+    # =========================================================
 
     node.print_peers()
     node.print_loads()
+
+    # =========================================================
+    # CREATE TASK
+    # =========================================================
 
     task = Task(
         function_name="calculate_sum",
@@ -52,14 +79,21 @@ async def main():
     print("SUBMITTING TASK")
     print("=" * 60)
 
-    await node.submit_task(
-        task
-    )
+    # =========================================================
+    # SUBMIT TASK
+    # =========================================================
 
+    await node.submit_task(task)
+
+    # Wait for the task result.
     result = await node.wait_for_task(
         task.task_id,
         timeout=30,
     )
+
+    # =========================================================
+    # FINAL TASK STATE
+    # =========================================================
 
     print()
     print("=" * 60)
@@ -92,6 +126,14 @@ async def main():
             f"Error   : "
             f"{result.error}"
         )
+
+    else:
+
+        print("No task result received.")
+
+    # =========================================================
+    # SHUTDOWN
+    # =========================================================
 
     await node.stop()
 

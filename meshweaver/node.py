@@ -487,6 +487,10 @@ class MeshNode:
     # MESSAGE ROUTER
     # =====================================================
 
+        # =====================================================
+    # MESSAGE ROUTER
+    # =====================================================
+
     async def handle_message(
         self,
         data,
@@ -527,18 +531,21 @@ class MeshNode:
             )
 
         elif message_type == AUTH_CHALLENGE:
+
             await self.handle_auth_challenge(
                 message,
                 addr,
             )
 
         elif message_type == AUTH_RESPONSE:
+
             await self.handle_auth_response(
                 message,
                 addr,
             )
 
         elif message_type == AUTH_SUCCESS:
+
             await self.handle_auth_success(
                 message,
                 addr,
@@ -568,6 +575,31 @@ class MeshNode:
             )
 
         elif message_type == TASK:
+
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK PACKET RECEIVED "
+                f"from {addr}"
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"TASK MESSAGE TYPE: "
+                f"{message.get('type')}"
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"TASK ID: "
+                f"{message.get('task_id')}"
+            )
+
+            print(
+                f"[{self.node_id}] "
+                f"TASK SENDER: "
+                f"{message.get('sender_id')}"
+            )
 
             await self.handle_task(
                 message,
@@ -629,8 +661,8 @@ class MeshNode:
                 f"[{self.node_id}] "
                 f"Unknown message: "
                 f"{message_type}"
+                
             )
-
     # =====================================================
     # HELLO
     # =====================================================
@@ -1111,6 +1143,10 @@ class MeshNode:
     # ASSIGN TASK
     # =====================================================
 
+        # =====================================================
+    # ASSIGN TASK
+    # =====================================================
+
     async def _assign_task(
         self,
         task,
@@ -1137,151 +1173,213 @@ class MeshNode:
                 "Peer address unavailable."
             )
 
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK SEND FAILED"
+            )
+
+            print(
+                f"   Worker : "
+                f"{peer_id}"
+            )
+
+            print(
+                f"   Reason : "
+                f"Peer address unavailable"
+            )
+
             return task
 
-        data = serialize_task(
-            task
-        )
-
-        message = create_task_message(
-            self.node_id,
-            task.task_id,
-            data,
-        )
+        # -------------------------------------------------
+        # SERIALIZE TASK
+        # -------------------------------------------------
 
         try:
 
+            data = serialize_task(
+                task
+            )
+
+            print()
+            print("=" * 60)
+            print(
+                f"[{self.node_id}] "
+                f"TASK PREPARING"
+            )
+            print("=" * 60)
+
+            print(
+                f"   Task ID     : "
+                f"{task.task_id}"
+            )
+
+            print(
+                f"   Worker      : "
+                f"{peer_id}"
+            )
+
+            print(
+                f"   Address     : "
+                f"{peer_addr}"
+            )
+
+            print(
+                f"   Data type   : "
+                f"{type(data).__name__}"
+            )
+
+            if isinstance(
+                data,
+                bytes,
+            ):
+
+                print(
+                    f"   Data size   : "
+                    f"{len(data)} bytes"
+                )
+
+            else:
+
+                print(
+                    f"   Data size   : "
+                    f"{len(str(data))} chars"
+                )
+
+        except Exception as exc:
+
+            task.fail(
+                f"Task serialization failed: {exc}"
+            )
+
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK SERIALIZATION ERROR: "
+                f"{exc}"
+            )
+
+            return task
+
+        # -------------------------------------------------
+        # CREATE TASK MESSAGE
+        # -------------------------------------------------
+
+        try:
+
+            message = create_task_message(
+                self.node_id,
+                task.task_id,
+                data,
+            )
+
+            encoded_message = encode_message(
+                message
+            )
+
+            print(
+                f"   Message type: "
+                f"{message.get('type')}"
+            )
+
+            print(
+                f"   Packet size : "
+                f"{len(encoded_message)} bytes"
+            )
+
+        except Exception as exc:
+
+            task.fail(
+                f"Task message creation failed: {exc}"
+            )
+
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK MESSAGE ERROR: "
+                f"{exc}"
+            )
+
+            return task
+
+        # -------------------------------------------------
+        # SEND TASK
+        # -------------------------------------------------
+
+        try:
+
+            if self.transport is None:
+
+                raise RuntimeError(
+                    "UDP transport is not available."
+                )
+
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK SENDING"
+            )
+
+            print(
+                f"   → Worker   : "
+                f"{peer_id}"
+            )
+
+            print(
+                f"   → Address  : "
+                f"{peer_addr}"
+            )
+
+            print(
+                f"   → Bytes    : "
+                f"{len(encoded_message)}"
+            )
+
+            print(
+                f"   → Transport: "
+                f"{type(self.transport).__name__}"
+            )
+
             self.transport.sendto(
-                encode_message(message),
+                encoded_message,
                 peer_addr,
             )
 
             print()
             print(
                 f"[{self.node_id}] "
-                f"TASK ROUTING"
+                f"TASK SENT SUCCESSFULLY"
             )
 
             print(
-                f"   Task      : "
+                f"   Task     : "
                 f"{task.task_id}"
             )
 
             print(
-                f"   Selected  : "
+                f"   Worker   : "
                 f"{peer_id}"
             )
 
             print(
-                f"   Load      : "
-                f"{self.peer_loads.get(peer_id)}"
-            )
-
-            print(
-                f"   Address   : "
+                f"   Address  : "
                 f"{peer_addr}"
             )
 
         except Exception as exc:
 
             task.fail(
-                str(exc)
+                f"Task send failed: {exc}"
+            )
+
+            print()
+            print(
+                f"[{self.node_id}] "
+                f"TASK SEND ERROR: "
+                f"{exc}"
             )
 
         return task
-
-    # =====================================================
-    # TASK RECEIVER
-    # =====================================================
-
-    async def handle_task(self, message, addr):
-        """
-    Handle an incoming TASK message.
-
-    Only authenticated peers are allowed to submit tasks.
-    """
-
-        sender_id = message.get("sender_id")
-
-    # ---------------------------------------------------------
-    # Security check 1: sender_id must exist
-    # ---------------------------------------------------------
-        if not sender_id:
-            print(
-                f"[{self.node_id}] "
-            f"SECURITY: rejected TASK with missing sender_id "
-            f"from {addr}"
-        )
-        return
-
-    # ---------------------------------------------------------
-    # Security check 2: sender must be authenticated
-    # ---------------------------------------------------------
-        if sender_id not in self.authenticated_peers:
-            print(
-            f"[{self.node_id}] "
-            f"SECURITY: rejected TASK from "
-            f"unauthenticated peer {sender_id}"
-        )
-        return
-
-    # ---------------------------------------------------------
-    # Authorized task
-    # ---------------------------------------------------------
-        print(
-        f"[{self.node_id}] "
-        f"Authorized TASK received from {sender_id}"
-    )
-
-        task_id = message.get("task_id")
-        task_data_hex = message.get("task_data")
-
-        if not task_id:
-            print(
-            f"[{self.node_id}] "
-            f"SECURITY: rejected TASK with missing task_id"
-        )
-        return
-
-        if not task_data_hex:
-            print(
-            f"[{self.node_id}] "
-            f"SECURITY: rejected TASK with missing task_data"
-            )
-        return
-
-        try:
-            task_data = bytes.fromhex(task_data_hex)
-        except ValueError:
-            print(
-            f"[{self.node_id}] "
-            f"SECURITY: rejected TASK with invalid task_data"
-        )
-        return
-
-    # ---------------------------------------------------------
-    # Existing task processing starts here
-    # ---------------------------------------------------------
-        try:
-            await self.execute_task(
-            sender_id=sender_id,
-            task_id=task_id,
-            task_data=task_data,
-            addr=addr,
-        )
-
-        except Exception as exc:
-            print(
-            f"[{self.node_id}] "
-            f"Task execution error: {exc}"
-        )
-            
-
-    def is_peer_authenticated(self, peer_id):
-        """
-    Return True if the peer has completed authentication.
-    """
-        return peer_id in self.authenticated_peers
     # =====================================================
     # RESULT
     # =====================================================
