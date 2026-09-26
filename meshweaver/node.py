@@ -29,7 +29,6 @@ from meshweaver.network.discovery import (
     create_auth_response,
     create_auth_success,
 
-    create_task_message,
     create_result_message,
 
     create_find_node,
@@ -81,11 +80,8 @@ from meshweaver.task.model import (
 )
 
 from meshweaver.task.network import (
+    create_task_message,
     extract_task,
-)
-
-from meshweaver.task.serializer import (
-    serialize_task,
 )
 
 from meshweaver.task.executor import (
@@ -487,10 +483,6 @@ class MeshNode:
     # MESSAGE ROUTER
     # =====================================================
 
-        # =====================================================
-    # MESSAGE ROUTER
-    # =====================================================
-
     async def handle_message(
         self,
         data,
@@ -531,21 +523,18 @@ class MeshNode:
             )
 
         elif message_type == AUTH_CHALLENGE:
-
             await self.handle_auth_challenge(
                 message,
                 addr,
             )
 
         elif message_type == AUTH_RESPONSE:
-
             await self.handle_auth_response(
                 message,
                 addr,
             )
 
         elif message_type == AUTH_SUCCESS:
-
             await self.handle_auth_success(
                 message,
                 addr,
@@ -575,31 +564,6 @@ class MeshNode:
             )
 
         elif message_type == TASK:
-
-            print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK PACKET RECEIVED "
-                f"from {addr}"
-            )
-
-            print(
-                f"[{self.node_id}] "
-                f"TASK MESSAGE TYPE: "
-                f"{message.get('type')}"
-            )
-
-            print(
-                f"[{self.node_id}] "
-                f"TASK ID: "
-                f"{message.get('task_id')}"
-            )
-
-            print(
-                f"[{self.node_id}] "
-                f"TASK SENDER: "
-                f"{message.get('sender_id')}"
-            )
 
             await self.handle_task(
                 message,
@@ -661,8 +625,8 @@ class MeshNode:
                 f"[{self.node_id}] "
                 f"Unknown message: "
                 f"{message_type}"
-                
             )
+
     # =====================================================
     # HELLO
     # =====================================================
@@ -1069,35 +1033,36 @@ class MeshNode:
         self,
         task: Task,
     ):
+        """Store and route a task to the best available peer."""
 
-        if not isinstance(
-            task,
-            Task,
-        ):
+        if not isinstance(task, Task):
             raise TypeError(
-                "submit_task() expects "
-                "a Task object"
+                "submit_task() expects a Task object"
             )
 
-        self.tasks[
-            task.task_id
-        ] = task
+        self.tasks[task.task_id] = task
 
-        best_peer = (
-            self.get_best_peer()
-        )
+        # Create the future BEFORE sending the UDP packet.
+        # This prevents a fast RESULT from arriving before
+        # wait_for_task() has registered its future.
+        loop = asyncio.get_running_loop()
+        future = self.task_futures.get(task.task_id)
+        if future is None or future.done():
+            self.task_futures[task.task_id] = loop.create_future()
+
+        best_peer = self.get_best_peer()
 
         if best_peer is None:
+            task.fail("No healthy peer available.")
 
-            task.fail(
-                "No healthy peer available."
-            )
+            future = self.task_futures.get(task.task_id)
+            if future is not None and not future.done():
+                future.set_result(task)
 
             print(
                 f"[{self.node_id}] "
                 f"No worker available."
             )
-
             return task
 
         return await self._assign_task(
@@ -1143,202 +1108,43 @@ class MeshNode:
     # ASSIGN TASK
     # =====================================================
 
-        # =====================================================
-    # ASSIGN TASK
-    # =====================================================
-
     async def _assign_task(
         self,
         task,
         peer_id,
     ):
+        """Serialize and send a task to a selected peer."""
 
-        task.assign(
-            peer_id
-        )
+        task.assign(peer_id)
+        self.tasks[task.task_id] = task
 
-        self.tasks[
-            task.task_id
-        ] = task
-
-        peer_addr = (
-            self.peer_addresses.get(
-                peer_id
-            )
-        )
+        peer_addr = self.peer_addresses.get(peer_id)
 
         if peer_addr is None:
-
-            task.fail(
-                "Peer address unavailable."
-            )
-
-            print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK SEND FAILED"
-            )
-
-            print(
-                f"   Worker : "
-                f"{peer_id}"
-            )
-
-            print(
-                f"   Reason : "
-                f"Peer address unavailable"
-            )
-
+            task.fail("Peer address unavailable.")
+            future = self.task_futures.get(task.task_id)
+            if future is not None and not future.done():
+                future.set_result(task)
             return task
 
-        # -------------------------------------------------
-        # SERIALIZE TASK
-        # -------------------------------------------------
-
         try:
-
-            data = serialize_task(
-                task
-            )
-
-            print()
-            print("=" * 60)
-            print(
-                f"[{self.node_id}] "
-                f"TASK PREPARING"
-            )
-            print("=" * 60)
-
-            print(
-                f"   Task ID     : "
-                f"{task.task_id}"
-            )
-
-            print(
-                f"   Worker      : "
-                f"{peer_id}"
-            )
-
-            print(
-                f"   Address     : "
-                f"{peer_addr}"
-            )
-
-            print(
-                f"   Data type   : "
-                f"{type(data).__name__}"
-            )
-
-            if isinstance(
-                data,
-                bytes,
-            ):
-
-                print(
-                    f"   Data size   : "
-                    f"{len(data)} bytes"
-                )
-
-            else:
-
-                print(
-                    f"   Data size   : "
-                    f"{len(str(data))} chars"
-                )
-
-        except Exception as exc:
-
-            task.fail(
-                f"Task serialization failed: {exc}"
-            )
-
-            print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK SERIALIZATION ERROR: "
-                f"{exc}"
-            )
-
-            return task
-
-        # -------------------------------------------------
-        # CREATE TASK MESSAGE
-        # -------------------------------------------------
-
-        try:
-
+            # task/network.py owns the TASK wire format.
+            # It serializes the complete Task object itself.
             message = create_task_message(
                 self.node_id,
-                task.task_id,
-                data,
+                task,
             )
-
-            encoded_message = encode_message(
-                message
-            )
-
-            print(
-                f"   Message type: "
-                f"{message.get('type')}"
-            )
-
-            print(
-                f"   Packet size : "
-                f"{len(encoded_message)} bytes"
-            )
-
-        except Exception as exc:
-
-            task.fail(
-                f"Task message creation failed: {exc}"
-            )
-
-            print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK MESSAGE ERROR: "
-                f"{exc}"
-            )
-
-            return task
-
-        # -------------------------------------------------
-        # SEND TASK
-        # -------------------------------------------------
-
-        try:
+            encoded_message = encode_message(message)
 
             if self.transport is None:
-
-                raise RuntimeError(
-                    "UDP transport is not available."
-                )
+                raise RuntimeError("UDP transport is not available.")
 
             print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK SENDING"
-            )
-
-            print(
-                f"   → Worker   : "
-                f"{peer_id}"
-            )
-
-            print(
-                f"   → Address  : "
-                f"{peer_addr}"
-            )
-
-            print(
-                f"   → Bytes    : "
-                f"{len(encoded_message)}"
-            )
-
-            print(
-                f"   → Transport: "
-                f"{type(self.transport).__name__}"
-            )
+            print(f"[{self.node_id}] TASK SENDING")
+            print(f"   Worker   : {peer_id}")
+            print(f"   Address  : {peer_addr}")
+            print(f"   Bytes    : {len(encoded_message)}")
+            print(f"   Transport: {type(self.transport).__name__}")
 
             self.transport.sendto(
                 encoded_message,
@@ -1346,40 +1152,152 @@ class MeshNode:
             )
 
             print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK SENT SUCCESSFULLY"
-            )
-
-            print(
-                f"   Task     : "
-                f"{task.task_id}"
-            )
-
-            print(
-                f"   Worker   : "
-                f"{peer_id}"
-            )
-
-            print(
-                f"   Address  : "
-                f"{peer_addr}"
-            )
+            print(f"[{self.node_id}] TASK SENT SUCCESSFULLY")
+            print(f"   Task     : {task.task_id}")
+            print(f"   Worker   : {peer_id}")
+            print(f"   Address  : {peer_addr}")
 
         except Exception as exc:
+            task.fail(f"Task send failed: {exc}")
 
-            task.fail(
-                f"Task send failed: {exc}"
+            future = self.task_futures.get(task.task_id)
+            if future is not None and not future.done():
+                future.set_result(task)
+
+            print()
+            print(f"[{self.node_id}] TASK SEND ERROR: {exc}")
+
+        return task
+
+    # =====================================================
+    # TASK RECEIVER
+    # =====================================================
+
+    async def handle_task(
+        self,
+        message,
+        addr,
+    ):
+        """Validate, deserialize, execute, and return an incoming TASK."""
+
+        sender_id = message.get("sender_id")
+        task_id = message.get("task_id")
+
+        print()
+        print(f"[{self.node_id}] TASK RECEIVED")
+        print(f"   From    : {addr}")
+        print(f"   Sender  : {sender_id}")
+        print(f"   Task ID : {task_id}")
+
+        if not sender_id:
+            print(
+                f"[{self.node_id}] TASK REJECTED: "
+                "missing sender_id"
+            )
+            return
+
+        if self.security_enabled and sender_id not in self.authenticated_peers:
+            print(
+                f"[{self.node_id}] TASK REJECTED: "
+                f"peer {sender_id} is not authenticated"
+            )
+            return
+
+        if not task_id:
+            print(
+                f"[{self.node_id}] TASK REJECTED: missing task_id"
+            )
+            return
+
+        if not message.get("task_data"):
+            print(
+                f"[{self.node_id}] TASK REJECTED: missing task_data"
+            )
+            return
+
+        try:
+            print(f"[{self.node_id}] DESERIALIZING TASK...")
+            task = extract_task(message)
+
+            if task.task_id != task_id:
+                raise ValueError("Task ID mismatch.")
+
+            task.assigned_peer = self.node_id
+            self.tasks[task.task_id] = task
+
+            print(f"[{self.node_id}] TASK DESERIALIZED")
+            print()
+            print(f"[{self.node_id}] EXECUTING TASK")
+
+            # execute_task() is synchronous. Run it in a worker thread
+            # so task execution does not block the asyncio event loop.
+            result_task = await asyncio.to_thread(
+                execute_task,
+                task,
+            )
+
+            status = result_task.status
+            if hasattr(status, "value"):
+                status = status.value
+
+            print(f"[{self.node_id}] TASK EXECUTION FINISHED")
+            print(f"   Status : {status}")
+            print(f"   Result : {result_task.result}")
+
+            result_message = create_result_message(
+                self.node_id,
+                result_task.task_id,
+                status,
+                result=result_task.result,
+                error=result_task.error,
+            )
+
+            encoded_result = encode_message(result_message)
+
+            if self.transport is None:
+                raise RuntimeError("UDP transport is not available.")
+
+            self.transport.sendto(
+                encoded_result,
+                addr,
             )
 
             print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK SEND ERROR: "
-                f"{exc}"
+            print(f"[{self.node_id}] TASK RESULT SENT")
+            print(f"   Task   : {result_task.task_id}")
+            print(f"   Status : {status}")
+            print(f"   To     : {addr}")
+
+        except Exception as exc:
+            print()
+            print(f"[{self.node_id}] TASK EXECUTION ERROR")
+            print(f"   Error : {exc}")
+
+            result_message = create_result_message(
+                self.node_id,
+                task_id,
+                TaskStatus.FAILED.value,
+                result=None,
+                error=str(exc),
             )
 
-        return task
+            try:
+                if self.transport is not None:
+                    self.transport.sendto(
+                        encode_message(result_message),
+                        addr,
+                    )
+            except Exception as send_exc:
+                print(
+                    f"[{self.node_id}] "
+                    f"FAILED TO SEND RESULT: {send_exc}"
+                )
+
+    def is_peer_authenticated(self, peer_id):
+        """
+    Return True if the peer has completed authentication.
+    """
+        return peer_id in self.authenticated_peers
     # =====================================================
     # RESULT
     # =====================================================
@@ -1389,104 +1307,43 @@ class MeshNode:
         message,
         addr,
     ):
+        """Handle a RESULT message and wake the waiting submitter."""
 
-        task_id = message.get(
-            "task_id"
-        )
+        task_id = message.get("task_id")
+        status = message.get("status")
+        result = message.get("result")
+        error = message.get("error")
+        sender_id = message.get("sender_id")
 
-        status = message.get(
-            "status"
-        )
-
-        result = message.get(
-            "result"
-        )
-
-        error = message.get(
-            "error"
-        )
-
-        sender_id = message.get(
-            "sender_id"
-        )
-
-        task = self.tasks.get(
-            task_id
-        )
+        task = self.tasks.get(task_id)
 
         if task is None:
-
             print(
                 f"[{self.node_id}] "
-                f"Unknown task result: "
-                f"{task_id}"
+                f"Unknown task result: {task_id}"
             )
-
             return
 
         if status == TaskStatus.COMPLETED.value:
-
-            task.complete(
-                result
-            )
+            task.complete(result)
 
             print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK COMPLETED"
-            )
-
-            print(
-                f"   Task   : "
-                f"{task_id}"
-            )
-
-            print(
-                f"   Worker : "
-                f"{sender_id}"
-            )
-
-            print(
-                f"   Result : "
-                f"{result}"
-            )
-
+            print(f"[{self.node_id}] TASK COMPLETED")
+            print(f"   Task   : {task_id}")
+            print(f"   Worker : {sender_id}")
+            print(f"   Result : {result}")
         else:
-
-            task.fail(
-                error or "Remote task failed."
-            )
+            task.fail(error or "Remote task failed.")
 
             print()
-            print(
-                f"[{self.node_id}] "
-                f"TASK FAILED"
-            )
+            print(f"[{self.node_id}] TASK FAILED")
+            print(f"   Task   : {task_id}")
+            print(f"   Worker : {sender_id}")
+            print(f"   Error  : {task.error}")
 
-            print(
-                f"   Task   : "
-                f"{task_id}"
-            )
-
-            print(
-                f"   Worker : "
-                f"{sender_id}"
-            )
-
-            print(
-                f"   Error  : "
-                f"{task.error}"
-            )
-
-        future = self.task_futures.get(
-            task_id
-        )
-
-        if future and not future.done():
-
-            future.set_result(
-                task
-            )
+        future = self.task_futures.get(task_id)
+        if future is not None and not future.done():
+            future.set_result(task)
 
     # =====================================================
     # WAIT FOR RESULT
@@ -1497,10 +1354,9 @@ class MeshNode:
         task_id,
         timeout=None,
     ):
+        """Wait for a remote RESULT without losing fast UDP responses."""
 
-        task = self.tasks.get(
-            task_id
-        )
+        task = self.tasks.get(task_id)
 
         if task is None:
             return None
@@ -1512,30 +1368,32 @@ class MeshNode:
             return task
 
         loop = asyncio.get_running_loop()
+        future = self.task_futures.get(task_id)
 
-        future = loop.create_future()
-
-        self.task_futures[
-            task_id
-        ] = future
+        if future is None:
+            future = loop.create_future()
+            self.task_futures[task_id] = future
 
         try:
-
-            if timeout:
-
+            if timeout is not None:
                 return await asyncio.wait_for(
-                    future,
+                    asyncio.shield(future),
                     timeout=timeout,
                 )
 
             return await future
 
-        finally:
-
-            self.task_futures.pop(
-                task_id,
-                None,
+        except asyncio.TimeoutError:
+            print(
+                f"[{self.node_id}] "
+                f"Timeout waiting for task {task_id}"
             )
+            return None
+
+        finally:
+            current = self.task_futures.get(task_id)
+            if current is future:
+                self.task_futures.pop(task_id, None)
 
     # =====================================================
     # PEER FAILURE
