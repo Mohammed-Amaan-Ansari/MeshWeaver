@@ -5,8 +5,17 @@ from meshweaver.task.model import Task
 from meshweaver.security.config import SecurityConfig
 
 
-def calculate_sum(numbers):
-    return sum(numbers)
+# =========================================================
+# LONG-RUNNING TEST TASK
+# =========================================================
+
+def long_running_task(seconds):
+    import time
+
+    print(f"[TASK] Long task started. Sleeping for {seconds} seconds...")
+    time.sleep(seconds)
+
+    return f"Long task completed after {seconds} seconds"
 
 
 async def main():
@@ -31,12 +40,11 @@ async def main():
             ("127.0.0.1", 9002),  # NODE_B
         ],
 
-        # Same security key used by the other nodes
         security_key=config.key,
     )
 
     # =========================================================
-    # START NODE COMPONENTS
+    # START NODE
     # =========================================================
 
     print()
@@ -50,8 +58,7 @@ async def main():
 
     await node.start_components()
 
-    # Give the submitter time to discover and authenticate
-    # with the other nodes.
+    # Give peers time to discover and authenticate
     print()
     print("[SUBMITTER] Waiting for peer discovery...")
 
@@ -70,15 +77,13 @@ async def main():
     node.print_loads()
 
     # =========================================================
-    # CREATE TASK
+    # CREATE LONG-RUNNING TASK
     # =========================================================
 
     task = Task(
-        function_name="calculate_sum",
-        function=calculate_sum,
-        args=(
-            [10, 20, 30, 40, 50],
-        ),
+        function_name="long_running_task",
+        function=long_running_task,
+        args=(30,),
     )
 
     # =========================================================
@@ -87,12 +92,12 @@ async def main():
 
     print()
     print("=" * 60)
-    print("SUBMITTING TASK")
+    print("SUBMITTING LONG-RUNNING TASK")
     print("=" * 60)
 
     print(f"Task ID : {task.task_id}")
-    print("Function: calculate_sum")
-    print("Input   : [10, 20, 30, 40, 50]")
+    print("Function: long_running_task")
+    print("Duration: 30 seconds")
 
     await node.submit_task(task)
 
@@ -102,10 +107,11 @@ async def main():
 
     print()
     print("[SUBMITTER] Waiting for task result...")
+    print("[SUBMITTER] You can stop the selected worker now.")
 
     result = await node.wait_for_task(
         task.task_id,
-        timeout=30,
+        timeout=60,
     )
 
     # =========================================================
@@ -124,25 +130,11 @@ async def main():
         if hasattr(status, "value"):
             status = status.value
 
-        print(
-            f"Task ID : {result.task_id}"
-        )
-
-        print(
-            f"Status  : {status}"
-        )
-
-        print(
-            f"Worker  : {result.assigned_peer}"
-        )
-
-        print(
-            f"Result  : {result.result}"
-        )
-
-        print(
-            f"Error   : {result.error}"
-        )
+        print(f"Task ID : {result.task_id}")
+        print(f"Status  : {status}")
+        print(f"Worker  : {result.assigned_peer}")
+        print(f"Result  : {result.result}")
+        print(f"Error   : {result.error}")
 
     else:
 
